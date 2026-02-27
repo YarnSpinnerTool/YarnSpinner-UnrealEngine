@@ -1,0 +1,61 @@
+# Unreal Engine
+
+# Build artifacts
+Binaries/
+Intermediate/
+Build/
+DerivedDataCache/
+
+# Saved data
+Saved/
+
+# Local plugin settings
+*.opensdf
+*.sdf
+*.suo
+*.sln
+*.xcworkspace
+*.xcodeproj
+
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# macOS
+.DS_Store
+._*
+__MACOSX/
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Compiled Object files
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lib
+*.a
+
+# Executables
+*.exe
+*.out
+*.app
