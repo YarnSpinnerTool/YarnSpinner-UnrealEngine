@@ -12,6 +12,8 @@ Requires Unreal Engine 5.4 or later. If you want to use Yarn Spinner for Unreal 
 > [!IMPORTANT]
 > Yarn Spinner for Unreal Engine is not yet for sale (it will always be available here for free, too). We rely on your support to keep everything free and accessible. If you want to support us during the Alpha period, you can support us on [GitHub Sponsors](https://github.com/sponsors/YarnSpinnerTool) or [Patreon](https://patreon.com/secretlab). GitHub sponsors of $25 and above, and Patreon members of the "Scribe" or above tier will receive a license to the paid version when it is released.
 
+**Please submit issues or feature requests via this form during the pre-release period:** https://thesecretlab.notion.site/31575227b0e280e4ab0bdf5fd0cf9310
+
 ## Differences from Yarn Spinner for Unity
 
 The VM, protobuf parser, library, and markup system were all written to match Unity's behaviour, but there are some differences:
