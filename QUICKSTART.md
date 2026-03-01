@@ -11,7 +11,7 @@ This gets you from zero to running dialogue in about five minutes. It assumes yo
 > [!TIP]
 > **Please submit issues or feature requests via this form during the pre-release period:** http://yarnspinner.dev/pre-release-feedback
 
-Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/unreal) and [Yarn Spinner site](https://yarnspiner.dev) for more information.
+Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/unreal) and [Yarn Spinner site](https://yarnspinner.dev) for more information.
 
 ## Install the Plugin
 
@@ -20,7 +20,7 @@ Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/u
 
 ## Install ysc
 
-The plugin needs `ysc` (the Yarn Spinner Cosole) to compile your `.yarn` files. Install the required version of it globally with:
+The plugin needs `ysc` (the Yarn Spinner Console) to compile your `.yarn` files. Install the required version of it globally with:
 
 ```
 `dotnet tool install YarnSpinner.Console --global --version 3.1.0-alpha1`
@@ -97,7 +97,7 @@ Other dialogue control nodes available in Blueprints:
 - **Get Current Node Name** -- get the name of the executing node
 - **Set Yarn Project** -- swap to a different Yarn project at runtime (see [Runtime Project Swap](#runtime-project-swap))
 
-Or tick `bAutoStart` in the Detals panel and set `StartNode` to your starting node name -- dialogue begins automatically when the game starts.
+Or tick `bAutoStart` in the Details panel and set `StartNode` to your starting node name -- dialogue begins automatically when the game starts.
 
 ### From C++
 

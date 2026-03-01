@@ -1,7 +1,7 @@
 # Yarn Spinner for Unreal Engine
 
 > [!CAUTION]
-> This is an Pre-release of Yarn Spinner for Unreal Engine. There will be bugs, we might change the API or features with an update, or something may break. We do not recommend you use this to ship a game just yet. 
+> This is a Pre-release of Yarn Spinner for Unreal Engine. There will be bugs, we might change the API or features with an update, or something may break. We do not recommend you use this to ship a game just yet. 
 
 Yarn Spinner for Unreal Engine is a pure-C++ implementation of the Yarn Spinner dialogue system for Unreal Engine. It runs compiled Yarn programs with the goal of full feature parity with Yarn Spinner for Unity, including node groups, saliency, detours, smart variables, localisation, markup, and voice over support.
 
@@ -19,7 +19,7 @@ Requires Unreal Engine 5.4 or later. If you want to use Yarn Spinner for Unreal 
 
 With thanks to Ben Phelan, who helped prototype the first version of this plugin, and the Epic MegaGrants program which funded that.
 
-Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/unreal) and [Yarn Spinner site](https://yarnspiner.dev) for more information.
+Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/unreal) and [Yarn Spinner site](https://yarnspinner.dev) for more information.
 
 ## Differences from Yarn Spinner for Unity
 
@@ -28,7 +28,7 @@ The VM, protobuf parser, library, and markup system were all written to match Un
 - **CLDR plural rules** -- Unity includes the full Unicode CLDR v42.0 database (~150 languages). This implementation has rules covering ~130 languages. Coverage is comprehensive, but if you're using `[plural]` or `[ordinal]` markup tags with a some languages, you might get the default "one/other" fallback instead of the correct plural form.
 - **No Unicode NFC normalisation** -- Unity normalises markup input text to NFC (composed) form before parsing. Unreal doesn't have a built-in NFC normaliser, so precomposed and decomposed Unicode characters are treated as-is. This only matters if your Yarn scripts contain combining characters like `e` + `\u0301` instead of `é`.
 - **Async model** -- Unity uses C# `async`/`await` with `YarnTask` and `CancellationTokenSource` chains. This implementation uses Unreal delegates and a two-tier `UYarnCancellationToken` system (hurry-up then next-content). The behaviour is the same, but the presenter API uses UE-idiomatic patterns instead of tasks.
-- **Command discovery** -- Unity uses `[YarnCommand]` attributes on methods. This implementation uses Blueprint-callable `UFUNCTION` methods on registered command handler objects, plus a C++ `AddCommandHandler` API. Both approaches register commands, just with diffeent syntax.
+- **Command discovery** -- Unity uses `[YarnCommand]` attributes on methods. This implementation uses Blueprint-callable `UFUNCTION` methods on registered command handler objects, plus a C++ `AddCommandHandler` API. Both approaches register commands, just with different syntax.
 - **Error handling** -- Unity throws exceptions for invalid states (missing variables, bad option indices, etc.). This implementation uses `UE_LOG` warnings/errors and defensive fallbacks where possible, which is more idiomatic for Unreal Engine.
 - **Localisation** -- Unity has multiple line provider backends (built-in, Unity Localization package, Addressables). This implementation uses Unreal's `FText` and string table system. You can subclass the line provider to plug in your own localisation pipeline.
 - **Blueprint support** -- This implementation exposes the full dialogue system to Blueprints. Every component is Blueprintable, every control method is BlueprintCallable, all events are BlueprintAssignable, and presenter methods are BlueprintNativeEvent. A `UYarnBlueprintLibrary` provides 30+ static utility functions. See [Blueprint Support](#blueprint-support) for details.
