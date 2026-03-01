@@ -7,12 +7,17 @@ Yarn Spinner for Unreal Engine is a pure-C++ implementation of the Yarn Spinner 
 
 The entire plugin is intended to be Blueprint-accessible. You can set up dialogue, handle commands, read/write variables, save/load state, swap projects at runtime, and build custom presenters entirely from Blueprints with no C++ required.
 
+A sample project will be coming soon, during the pre-release period!
+
 Requires Unreal Engine 5.4 or later. If you want to use Yarn Spinner for Unreal Engine with an earlier version of Unreal Engine, please contact us via https://yarnspinner.dev
 
 > [!IMPORTANT]
 > Yarn Spinner for Unreal Engine is not yet for sale (it will always be available here for free, too). We rely on your support to keep everything free and accessible. If you want to support us during the Alpha period, you can support us on [GitHub Sponsors](https://github.com/sponsors/YarnSpinnerTool) or [Patreon](https://patreon.com/secretlab). GitHub sponsors of $25 and above, and Patreon members of the "Scribe" or above tier will receive a license to the paid version when it is released.
 
-**Please submit issues or feature requests via this form during the pre-release period:** https://thesecretlab.notion.site/31575227b0e280e4ab0bdf5fd0cf9310
+> [!TIP]
+> **Please submit issues or feature requests via this form during the pre-release period:** http://yarnspinner.dev/pre-release-feedback
+
+With thanks to Ben Phelan, who helped prototype the first version of this plugin, and the Epic MegaGrants program which funded that.
 
 ## Differences from Yarn Spinner for Unity
 
@@ -33,7 +38,7 @@ This project uses the Yarn Spinner Public License. You're free to use it in your
 
 ## Installation
 
-1. Copy the `YarnSpinner/` plugin folder into your Unreal project's `Plugins/` directory.
+1. Copy the `YarnSpinner/` folder from this repository into your Unreal project's `Plugins/` directory (so that `YarnSpinner.uplugin` is at `Plugins/YarnSpinner/YarnSpinner.uplugin`).
 2. Open your project in the Unreal Editor -- the plugin will be detected automatically.
 3. Install `ysc` (the [Yarn Spinner Console](https://github.com/YarnSpinnerTool/YarnSpinner-Console) tool) from : `dotnet tool install YarnSpinner.Console --global --version 3.1.0-alpha1`
 4. Write your dialogue in `.yarn` files. Create a `.yarnproject` file that defines which `.yarn` files to include via `sourceFiles` globs.
