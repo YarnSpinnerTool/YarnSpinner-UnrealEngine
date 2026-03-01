@@ -8,6 +8,11 @@ This gets you from zero to running dialogue in about five minutes. It assumes yo
 > [!IMPORTANT]
 > Yarn Spinner for Unreal Engine is not yet for sale (it will always be available here for free, too). We rely on your support to keep everything free and accessible. If you want to support us during the Alpha period, you can support us on [GitHub Sponsors](https://github.com/sponsors/YarnSpinnerTool) or [Patreon](https://patreon.com/secretlab). GitHub sponsors of $25 and above, and Patreon members of the "Scribe" or above tier will receive a license to the paid version when it is released.
 
+> [!TIP]
+> **Please submit issues or feature requests via this form during the pre-release period:** http://yarnspinner.dev/pre-release-feedback
+
+Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/unreal) and [Yarn Spinner site](https://yarnspiner.dev) for more information.
+
 ## Install the Plugin
 
 1. Copy the `YarnSpinner/` plugin folder into your Unreal project's `Plugins/` directory.

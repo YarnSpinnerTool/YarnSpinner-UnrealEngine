@@ -19,6 +19,8 @@ Requires Unreal Engine 5.4 or later. If you want to use Yarn Spinner for Unreal 
 
 With thanks to Ben Phelan, who helped prototype the first version of this plugin, and the Epic MegaGrants program which funded that.
 
+Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/unreal) and [Yarn Spinner site](https://yarnspiner.dev) for more information.
+
 ## Differences from Yarn Spinner for Unity
 
 The VM, protobuf parser, library, and markup system were all written to match Unity's behaviour, but there are some differences:
