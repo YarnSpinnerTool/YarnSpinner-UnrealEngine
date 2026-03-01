@@ -1,7 +1,7 @@
 # Yarn Spinner for Unreal Engine
 
 > [!CAUTION]
-> This is an Alpha release of Yarn Spinner for Unreal Engine. There will be bugs, we might change the API or features with an update, or something may break. We do not recommend you use this to ship a game just yet. 
+> This is an Pre-release of Yarn Spinner for Unreal Engine. There will be bugs, we might change the API or features with an update, or something may break. We do not recommend you use this to ship a game just yet. 
 
 Yarn Spinner for Unreal Engine is a pure-C++ implementation of the Yarn Spinner dialogue system for Unreal Engine. It runs compiled Yarn programs with the goal of full feature parity with Yarn Spinner for Unity, including node groups, saliency, detours, smart variables, localisation, markup, and voice over support.
 
