@@ -1959,8 +1959,8 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 
 		if (!bHasCharacterAttr)
 		{
-			// Match "Name: " at the start of text (only the first colon)
-			FRegexPattern Pattern(TEXT("^[^:]*:\\s*"));
+			// Match "Name: " at the start of text, handling escaped colons (\:)
+			FRegexPattern Pattern(TEXT("^((?:[^:\\\\]|\\\\.)*?(?<!\\\\)):\\s*"));
 			FRegexMatcher Matcher(Pattern, PlainText);
 
 			if (Matcher.FindNext())
@@ -1968,13 +1968,8 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 				FString Match = PlainText.Mid(Matcher.GetMatchBeginning(), Matcher.GetMatchEnding() - Matcher.GetMatchBeginning());
 				int32 MatchLen = Match.Len();
 
-				// Extract character name (trim colon and whitespace)
-				FString CharName = Match;
-				CharName.TrimEndInline();
-				if (CharName.EndsWith(TEXT(":")))
-				{
-					CharName = CharName.LeftChop(1);
-				}
+				// Extract character name from capture group 1
+				FString CharName = PlainText.Mid(Matcher.GetCaptureGroupBeginning(1), Matcher.GetCaptureGroupEnding(1) - Matcher.GetCaptureGroupBeginning(1));
 				CharName.TrimStartAndEndInline();
 
 				if (!CharName.IsEmpty())
@@ -2006,6 +2001,14 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 	else
 	{
 		Result.TextWithoutCharacterName = PlainText;
+	}
+
+	// Unescape \: to : now that character detection is done
+	PlainText = PlainText.Replace(TEXT("\\:"), TEXT(":"));
+	Result.TextWithoutCharacterName = Result.TextWithoutCharacterName.Replace(TEXT("\\:"), TEXT(":"));
+	if (!Result.CharacterName.IsEmpty())
+	{
+		Result.CharacterName = Result.CharacterName.Replace(TEXT("\\:"), TEXT(":"));
 	}
 
 	Result.Text = PlainText;
