@@ -16,6 +16,7 @@
 // ============================================================================
 
 #include "YarnDialogueRunner.h"
+#include "YarnSpinnerVersion.h"
 #include "YarnDialoguePresenter.h"
 #include "YarnLocalization.h"
 #include "YarnSmartVariables.h"
@@ -704,7 +705,11 @@ bool UYarnDialogueRunner::TryDispatchToBlueprintHandler(const FYarnCommand& Comm
 
 					// ImportText converts the string to the appropriate property type
 					// This handles FString, float, int, bool, FVector, FRotator, etc.
-					const TCHAR* Result = It->ImportText_InContainer(*ArgString, ParamBuffer, HandlerObject, PPF_None);
+	#if YARNSPINNER_ENGINE_VERSION_5_OR_LATER
+				const TCHAR* Result = It->ImportText_InContainer(*ArgString, ParamBuffer, HandlerObject, PPF_None);
+#else
+				const TCHAR* Result = It->ImportText(*ArgString, ParamBuffer, PPF_None, HandlerObject);
+#endif
 
 					if (!Result && bVerboseLogging)
 					{

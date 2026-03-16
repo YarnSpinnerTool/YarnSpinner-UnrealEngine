@@ -50,7 +50,6 @@ public class YarnSpinnerEditor : ModuleRules
 				"SlateCore",
 				"UnrealEd",
 				"AssetTools",
-				"EditorFramework",
 				"Projects",
 				"InputCore",
 				"Json",
@@ -59,6 +58,12 @@ public class YarnSpinnerEditor : ModuleRules
 				"DirectoryWatcher",
 			}
 		);
+
+		// EditorFramework module is only needed in UE5+ (AssetImportData moved there)
+		if (Target.Version.MajorVersion >= 5)
+		{
+			PrivateDependencyModuleNames.Add("EditorFramework");
+		}
 
 		DynamicallyLoadedModuleNames.AddRange(
 			new string[]

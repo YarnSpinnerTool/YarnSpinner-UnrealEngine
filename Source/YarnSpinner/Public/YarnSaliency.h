@@ -41,8 +41,9 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "YarnVariableStorage.h"
 #include "YarnSaliency.generated.h"
+
+class IYarnVariableStorage;
 
 // ============================================================================
 // EYarnSaliencyStrategy

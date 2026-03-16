@@ -19,6 +19,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
+#include "YarnSpinnerVersion.h"
 #include "YarnSourceFile.generated.h"
 
 /**
@@ -77,6 +78,10 @@ public:
 	class UAssetImportData* AssetImportData;
 
 	virtual void PostInitProperties() override;
+#if YARNSPINNER_WITH_ASSET_REGISTRY_TAGS_CONTEXT
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
+#else
+	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
+#endif
 #endif
 };

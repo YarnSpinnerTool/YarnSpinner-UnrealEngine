@@ -84,6 +84,32 @@
 // API Compatibility Macros
 // ============================================================================
 
+/**
+ * FAssetData::AssetClassPath and UClass::GetClassPathName() are UE5+ only.
+ * In UE4.27, use AssetClass (FName) and GetFName().
+ */
+#define YARNSPINNER_WITH_ASSET_CLASS_PATH YARNSPINNER_ENGINE_VERSION_5_OR_LATER
+
+/**
+ * AssetImportData.h moved from Engine to EditorFramework module in UE5.
+ * In UE4.27, include "Engine/AssetImportData.h".
+ * In UE5+, include "EditorFramework/AssetImportData.h".
+ */
+#define YARNSPINNER_WITH_EDITOR_FRAMEWORK_MODULE YARNSPINNER_ENGINE_VERSION_5_OR_LATER
+
+/**
+ * AssetRegistryModule.h include path changed in UE5.
+ * UE4.27: "AssetRegistryModule.h"
+ * UE5+: "AssetRegistry/AssetRegistryModule.h"
+ */
+#define YARNSPINNER_WITH_ASSET_REGISTRY_SUBDIR YARNSPINNER_ENGINE_VERSION_5_OR_LATER
+
+/**
+ * FAssetRegistryTagsContext was introduced in UE 5.1.
+ * In UE4.27, GetAssetRegistryTags uses TArray<FAssetRegistryTag>& OutTags.
+ */
+#define YARNSPINNER_WITH_ASSET_REGISTRY_TAGS_CONTEXT YARNSPINNER_ENGINE_VERSION_5_1_OR_LATER
+
 #define YARNSPINNER_ADD_MOVEMENT_INPUT AddMovementInput
 #define YARNSPINNER_ADD_CONTROLLER_YAW_INPUT AddControllerYawInput
 #define YARNSPINNER_ADD_CONTROLLER_PITCH_INPUT AddControllerPitchInput

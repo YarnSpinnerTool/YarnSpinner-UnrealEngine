@@ -180,7 +180,7 @@ FYarnMarkupReplacementResult UYarnStyleMarkupProcessor::ProcessMarkup_Implementa
 		// Try using the first property value as the style name
 		for (const auto& Pair : Attribute.Properties)
 		{
-			StyleName = Pair.Value;
+			StyleName = Pair.Value.ToString();
 			break;
 		}
 	}
@@ -1480,7 +1480,7 @@ static bool ProcessBuiltInReplacement(
 		// Replace % with the numeric value (formatted with current culture)
 		// but not \% which is a literal %
 		FString FormattedValue;
-		if (FMath::IsNearlyEqual(FMath::Frac(NumericValue), 0.0))
+		if (FMath::IsNearlyEqual(FMath::Frac(NumericValue), 0.0f))
 		{
 			FormattedValue = FString::Printf(TEXT("%d"), static_cast<int32>(NumericValue));
 		}

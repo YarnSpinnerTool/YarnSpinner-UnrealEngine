@@ -55,6 +55,7 @@ void UYarnSourceFile::PostInitProperties()
 	Super::PostInitProperties();
 }
 
+#if YARNSPINNER_WITH_ASSET_REGISTRY_TAGS_CONTEXT
 void UYarnSourceFile::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
 {
 	if (AssetImportData)
@@ -64,4 +65,15 @@ void UYarnSourceFile::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 
 	Super::GetAssetRegistryTags(Context);
 }
+#else
+void UYarnSourceFile::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
+{
+	if (AssetImportData)
+	{
+		OutTags.Add(FAssetRegistryTag(TEXT("SourceFile"), AssetImportData->GetSourceData().ToJson(), FAssetRegistryTag::TT_Hidden));
+	}
+
+	Super::GetAssetRegistryTags(OutTags);
+}
+#endif
 #endif

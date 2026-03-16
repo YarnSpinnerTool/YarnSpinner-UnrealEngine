@@ -406,6 +406,8 @@ public:
 	virtual bool TryGetSmartVariable(const FString& Name, FYarnValue& OutResult) override;
 
 protected:
+	friend class UYarnDialoguePresenter;
+
 	// ========================================================================
 	// Internal state
 	// ========================================================================

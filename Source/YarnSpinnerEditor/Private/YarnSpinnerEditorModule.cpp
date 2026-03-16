@@ -25,7 +25,13 @@
 #include "Interfaces/IPluginManager.h"
 #include "DirectoryWatcherModule.h"
 #include "IDirectoryWatcher.h"
+#include "YarnSpinnerVersion.h"
+
+#if YARNSPINNER_WITH_ASSET_REGISTRY_SUBDIR
 #include "AssetRegistry/AssetRegistryModule.h"
+#else
+#include "AssetRegistryModule.h"
+#endif
 #include "YarnProgram.h"
 #include "EditorReimportHandler.h"
 #include "Editor.h"
@@ -133,7 +139,11 @@ void FYarnSpinnerEditorModule::SetupSourceFileWatchers()
 
 	AssetAddedHandle = AssetRegistry.OnAssetAdded().AddLambda([this](const FAssetData& AssetData)
 	{
+#if YARNSPINNER_WITH_ASSET_CLASS_PATH
 		if (AssetData.AssetClassPath == UYarnProject::StaticClass()->GetClassPathName())
+#else
+		if (AssetData.AssetClass == UYarnProject::StaticClass()->GetFName())
+#endif
 		{
 			// Delay rebuild slightly so the asset is fully loaded
 			if (GEditor)
@@ -148,7 +158,11 @@ void FYarnSpinnerEditorModule::SetupSourceFileWatchers()
 
 	AssetRemovedHandle = AssetRegistry.OnAssetRemoved().AddLambda([this](const FAssetData& AssetData)
 	{
+#if YARNSPINNER_WITH_ASSET_CLASS_PATH
 		if (AssetData.AssetClassPath == UYarnProject::StaticClass()->GetClassPathName())
+#else
+		if (AssetData.AssetClass == UYarnProject::StaticClass()->GetFName())
+#endif
 		{
 			RebuildWatcherState();
 		}
@@ -243,7 +257,11 @@ void FYarnSpinnerEditorModule::RebuildWatcherState()
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
 	TArray<FAssetData> YarnProjectAssets;
+#if YARNSPINNER_WITH_ASSET_CLASS_PATH
 	AssetRegistry.GetAssetsByClass(UYarnProject::StaticClass()->GetClassPathName(), YarnProjectAssets);
+#else
+	AssetRegistry.GetAssetsByClass(UYarnProject::StaticClass()->GetFName(), YarnProjectAssets);
+#endif
 
 	TSet<FString> DirectoriesToWatch;
 

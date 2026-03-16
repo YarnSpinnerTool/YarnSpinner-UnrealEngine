@@ -16,6 +16,7 @@
 // ============================================================================
 
 #include "YarnSaliency.h"
+#include "YarnVariableStorage.h"
 #include "YarnDialogueRunner.h"
 
 // first strategy - just return first viable candidate
