@@ -1517,6 +1517,44 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 	}
 
 	// ========================================================================
+	// Phase 0: Implicit character detection (before markup parsing)
+	// Inject [character] markup into the input so the character attribute
+	// goes through the full markup pipeline (matching C# LineParser)
+	// ========================================================================
+
+	FString Input = Text;
+
+	if (bAddImplicitCharacterAttribute)
+	{
+		// Check if there's already an explicit [character marker
+		FRegexPattern ExplicitPattern(TEXT("^\\s*\\[character"));
+		FRegexMatcher ExplicitMatcher(ExplicitPattern, Input);
+
+		if (!ExplicitMatcher.FindNext())
+		{
+			FRegexPattern ImplicitPattern(TEXT("^((?:[^:\\\\]|\\\\.)*):\\s*"));
+			FRegexMatcher ImplicitMatcher(ImplicitPattern, Input);
+
+			if (ImplicitMatcher.FindNext())
+			{
+				int32 MatchEnd = ImplicitMatcher.GetMatchEnding();
+				FString CharName = Input.Mid(
+					ImplicitMatcher.GetCaptureGroupBeginning(1),
+					ImplicitMatcher.GetCaptureGroupEnding(1) - ImplicitMatcher.GetCaptureGroupBeginning(1));
+				FString MatchStr = Input.Mid(0, MatchEnd);
+				FString Rest = Input.Mid(MatchEnd);
+
+				Input = FString::Printf(
+					TEXT("[character name=\"%s\"]%s[/character]%s"),
+					*CharName, *MatchStr, *Rest);
+			}
+		}
+	}
+
+	// Unescape \: to : now that character detection is done
+	Input = Input.Replace(TEXT("\\:"), TEXT(":"));
+
+	// ========================================================================
 	// Phase 1: Parse markup tags into plain text and attributes
 	// Handles escape sequences, close-all [/], nomarkup, self-closing tags
 	// with whitespace trimming, adoption agency for misnested tags, and
@@ -1531,15 +1569,15 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 	bool bTrimNextWhitespace = false;
 
 	int32 i = 0;
-	while (i < Text.Len())
+	while (i < Input.Len())
 	{
-		TCHAR C = Text[i];
+		TCHAR C = Input[i];
 
 		// ---- Escape sequences ----
 		// \[ becomes [ in the output, \] becomes ]
-		if (C == TEXT('\\') && i + 1 < Text.Len())
+		if (C == TEXT('\\') && i + 1 < Input.Len())
 		{
-			TCHAR NextChar = Text[i + 1];
+			TCHAR NextChar = Input[i + 1];
 			if (NextChar == TEXT('[') || NextChar == TEXT(']'))
 			{
 				PlainText.AppendChar(NextChar);
@@ -1558,13 +1596,13 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 			// Find the end of the tag
 			int32 TagEnd = INDEX_NONE;
 			bool bInTagQuotes = false;
-			for (int32 j = i + 1; j < Text.Len(); j++)
+			for (int32 j = i + 1; j < Input.Len(); j++)
 			{
-				if (Text[j] == TEXT('"'))
+				if (Input[j] == TEXT('"'))
 				{
 					bInTagQuotes = !bInTagQuotes;
 				}
-				else if (Text[j] == TEXT(']') && !bInTagQuotes)
+				else if (Input[j] == TEXT(']') && !bInTagQuotes)
 				{
 					TagEnd = j;
 					break;
@@ -1580,7 +1618,7 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 				continue;
 			}
 
-			FString TagContent = Text.Mid(i + 1, TagEnd - i - 1);
+			FString TagContent = Input.Mid(i + 1, TagEnd - i - 1);
 
 			// ---- Close-all [/] ----
 			if (TagContent == TEXT("/"))
@@ -1739,12 +1777,12 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 			{
 				// Find [/nomarkup] closing tag
 				FString CloseTag = TEXT("[/nomarkup]");
-				int32 CloseIdx = Text.Find(CloseTag, ESearchCase::CaseSensitive, ESearchDir::FromStart, TagEnd + 1);
+				int32 CloseIdx = Input.Find(CloseTag, ESearchCase::CaseSensitive, ESearchDir::FromStart, TagEnd + 1);
 
 				if (CloseIdx != INDEX_NONE)
 				{
 					// Everything between [nomarkup] and [/nomarkup] is literal text
-					FString LiteralText = Text.Mid(TagEnd + 1, CloseIdx - TagEnd - 1);
+					FString LiteralText = Input.Mid(TagEnd + 1, CloseIdx - TagEnd - 1);
 					int32 StartPos = PlainText.Len();
 					PlainText += LiteralText;
 
@@ -1761,7 +1799,7 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 				else
 				{
 					// No closing [/nomarkup] - treat rest as literal
-					FString LiteralText = Text.Mid(TagEnd + 1);
+					FString LiteralText = Input.Mid(TagEnd + 1);
 					int32 StartPos = PlainText.Len();
 					PlainText += LiteralText;
 
@@ -1772,7 +1810,7 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 					Attr.Length = LiteralText.Len();
 					Result.Attributes.Add(Attr);
 
-					i = Text.Len();
+					i = Input.Len();
 				}
 				bTrimNextWhitespace = false;
 				continue;
@@ -1930,85 +1968,21 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 	});
 
 	// ========================================================================
-	// Phase 4: Character name extraction
-	// Implicit character attribute: "Name: text" pattern
-	// Only if no explicit "character" attribute exists
+	// Phase 4: Extract character name and text-without-character from
+	// the parsed character attribute (created by Phase 0 or explicit markup)
 	// ========================================================================
-	if (bAddImplicitCharacterAttribute)
+	Result.TextWithoutCharacterName = PlainText;
+	for (const FYarnMarkupAttribute& Attr : Result.Attributes)
 	{
-		// Check if there's already a character attribute
-		bool bHasCharacterAttr = false;
-		for (const FYarnMarkupAttribute& Attr : Result.Attributes)
+		if (Attr.Name.Equals(CharacterAttribute, ESearchCase::CaseSensitive))
 		{
-			if (Attr.Name.Equals(CharacterAttribute, ESearchCase::CaseSensitive))
+			Result.CharacterName = Attr.GetProperty(TEXT("name"));
+			if (Attr.Length > 0)
 			{
-				bHasCharacterAttr = true;
-				// Extract character name from the attribute
-				Result.CharacterName = Attr.GetProperty(TEXT("name"));
-				if (Attr.Length > 0)
-				{
-					Result.TextWithoutCharacterName = PlainText.Mid(Attr.Length);
-				}
-				else
-				{
-					Result.TextWithoutCharacterName = PlainText;
-				}
-				break;
+				Result.TextWithoutCharacterName = PlainText.Mid(Attr.Length);
 			}
+			break;
 		}
-
-		if (!bHasCharacterAttr)
-		{
-			// Match "Name: " at the start of text, handling escaped colons (\:)
-			FRegexPattern Pattern(TEXT("^((?:[^:\\\\]|\\\\.)*?(?<!\\\\)):\\s*"));
-			FRegexMatcher Matcher(Pattern, PlainText);
-
-			if (Matcher.FindNext())
-			{
-				FString Match = PlainText.Mid(Matcher.GetMatchBeginning(), Matcher.GetMatchEnding() - Matcher.GetMatchBeginning());
-				int32 MatchLen = Match.Len();
-
-				// Extract character name from capture group 1
-				FString CharName = PlainText.Mid(Matcher.GetCaptureGroupBeginning(1), Matcher.GetCaptureGroupEnding(1) - Matcher.GetCaptureGroupBeginning(1));
-				CharName.TrimStartAndEndInline();
-
-				if (!CharName.IsEmpty())
-				{
-					Result.CharacterName = CharName;
-
-					// Add implicit character attribute at position 0
-					FYarnMarkupAttribute CharAttr;
-					CharAttr.Name = CharacterAttribute;
-					CharAttr.Position = 0;
-					CharAttr.SourcePosition = -1;
-					CharAttr.Length = MatchLen;
-					CharAttr.Properties.Add(TEXT("name"), FYarnMarkupValue::MakeString(CharName));
-					Result.Attributes.Insert(CharAttr, 0); // Insert at beginning
-
-					Result.TextWithoutCharacterName = PlainText.Mid(MatchLen);
-				}
-				else
-				{
-					Result.TextWithoutCharacterName = PlainText;
-				}
-			}
-			else
-			{
-				Result.TextWithoutCharacterName = PlainText;
-			}
-		}
-	}
-	else
-	{
-		Result.TextWithoutCharacterName = PlainText;
-	}
-
-	// Unescape \: to : now that character detection is done
-	PlainText = PlainText.Replace(TEXT("\\:"), TEXT(":"));
-	Result.TextWithoutCharacterName = Result.TextWithoutCharacterName.Replace(TEXT("\\:"), TEXT(":"));
-	if (!Result.CharacterName.IsEmpty())
-	{
-		Result.CharacterName = Result.CharacterName.Replace(TEXT("\\:"), TEXT(":"));
 	}
 
 	Result.Text = PlainText;
