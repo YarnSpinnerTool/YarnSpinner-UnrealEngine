@@ -1410,11 +1410,23 @@ bool UYarnDialogueRunner::IsOptionNextContentRequested() const
 
 void UYarnDialogueRunner::CreateSaliencyStrategy()
 {
+	// Honour a strategy that was installed externally (via SetSaliencyStrategy)
+	// before BeginPlay/lazy init - don't clobber it.
+	if (ActiveSaliencyStrategy.GetInterface())
+	{
+		return;
+	}
+
 	ActiveSaliencyStrategy = UYarnSaliencyStrategyFactory::CreateStrategy(
 		SaliencyStrategy,
 		VariableStorage,
 		this
 	);
+}
+
+void UYarnDialogueRunner::SetSaliencyStrategy(TScriptInterface<IYarnSaliencyStrategy> InStrategy)
+{
+	ActiveSaliencyStrategy = InStrategy;
 }
 
 void UYarnDialogueRunner::HandleAddSaliencyCandidate(const FYarnSaliencyCandidate& Candidate)

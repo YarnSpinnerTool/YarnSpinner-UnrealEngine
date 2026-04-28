@@ -397,6 +397,26 @@ public:
 	void RemoveFunction(const FString& FunctionName);
 
 	// ========================================================================
+	// Saliency strategy
+	// ========================================================================
+
+	/**
+	 * Install a custom saliency strategy.
+	 *
+	 * Replaces whichever strategy was created from the SaliencyStrategy enum.
+	 * Pass any UObject implementing IYarnSaliencyStrategy (C++ or Blueprint).
+	 *
+	 * Safe to call before or after BeginPlay - if called before, the runner's
+	 * BeginPlay won't overwrite it.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Saliency")
+	void SetSaliencyStrategy(TScriptInterface<IYarnSaliencyStrategy> InStrategy);
+
+	/** Get the currently active saliency strategy. */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Saliency")
+	TScriptInterface<IYarnSaliencyStrategy> GetSaliencyStrategy() const { return ActiveSaliencyStrategy; }
+
+	// ========================================================================
 	// IYarnSmartVariableEvaluator implementation
 	// ========================================================================
 
