@@ -405,6 +405,12 @@ public:
 	virtual bool TryGetSmartVariableAsString(const FString& Name, FString& OutResult) override;
 	virtual bool TryGetSmartVariable(const FString& Name, FYarnValue& OutResult) override;
 
+	/**
+	 * Called by a presenter when it finishes presenting a line.
+	 * Decrements ActiveLinePresenterCount and calls Continue() when all presenters are done.
+	 */
+	void NotifyPresenterLineComplete();
+
 protected:
 	// ========================================================================
 	// Internal state
@@ -526,12 +532,6 @@ protected:
 
 	/** Handle prepare for lines (pre-loading for upcoming lines) */
 	void HandlePrepareForLines(const TArray<FString>& LineIDs);
-
-	/**
-	 * Called by a presenter when it finishes presenting a line.
-	 * Decrements ActiveLinePresenterCount and calls Continue() when all presenters are done.
-	 */
-	void NotifyPresenterLineComplete();
 
 	/** Clear saliency candidates */
 	void ClearSaliencyCandidates();

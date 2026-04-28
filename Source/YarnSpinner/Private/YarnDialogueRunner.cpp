@@ -776,6 +776,162 @@ int32 UYarnDialogueRunner::GetFunctionParameterCount(const FString& FunctionName
 	return Count ? *Count : 0;
 }
 
+// Hoisted out of RegisterBuiltInFunctions() lambdas: Clang 19 + UE5.7's consteval
+// FString::Printf format-string check trips "cannot take address of immediate call
+// operator" when these are written inline as TFunction-bound lambdas.
+static FYarnValue YarnFn_FormatInvariant(const TArray<FYarnValue>& Params)
+{
+	if (Params.Num() < 1) return FYarnValue(FString());
+	float Value = Params[0].ConvertToNumber();
+	// Uses "G" format with 7 significant digits.
+	// Outputs integers without a decimal point; uses scientific notation for very large/small values.
+	return FYarnValue(FString::Printf(TEXT("%.7G"), Value));
+}
+
+static FYarnValue YarnFn_Format(const TArray<FYarnValue>& Params)
+{
+	if (Params.Num() < 2) return FYarnValue(FString());
+	FString FormatString = Params[0].ConvertToString();
+
+	// Check if there's a format specifier: {0:spec}
+	int32 ColonPos = INDEX_NONE;
+	int32 BraceStart = FormatString.Find(TEXT("{0"));
+	if (BraceStart != INDEX_NONE)
+	{
+		int32 BraceEnd = FormatString.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, BraceStart);
+		if (BraceEnd != INDEX_NONE)
+		{
+			FString PlaceholderContent = FormatString.Mid(BraceStart + 1, BraceEnd - BraceStart - 1);
+			int32 LocalColon;
+			if (PlaceholderContent.FindChar(TEXT(':'), LocalColon))
+			{
+				ColonPos = BraceStart + 1 + LocalColon;
+			}
+		}
+
+		if (ColonPos != INDEX_NONE)
+		{
+			// Has format specifier - extract it
+			int32 BraceEnd2 = FormatString.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ColonPos);
+			if (BraceEnd2 != INDEX_NONE)
+			{
+				FString Specifier = FormatString.Mid(ColonPos + 1, BraceEnd2 - ColonPos - 1);
+				FString Placeholder = FormatString.Mid(BraceStart, BraceEnd2 - BraceStart + 1);
+				FString Formatted;
+
+				float NumValue = Params[1].ConvertToNumber();
+				TCHAR SpecChar = Specifier.Len() > 0 ? FChar::ToUpper(Specifier[0]) : TEXT('G');
+				int32 Precision = Specifier.Len() > 1 ? FCString::Atoi(*Specifier.Mid(1)) : -1;
+
+				switch (SpecChar)
+				{
+				case TEXT('F'): // Fixed-point
+					Formatted = FString::Printf(TEXT("%.*f"), Precision >= 0 ? Precision : 2, NumValue);
+					break;
+				case TEXT('N'): // Number with thousand separators
+				{
+					int32 DecPlaces = Precision >= 0 ? Precision : 2;
+					FString NumStr = FString::Printf(TEXT("%.*f"), DecPlaces, FMath::Abs(NumValue));
+					int32 DotPos;
+					FString IntPart, FracPart;
+					if (NumStr.FindChar(TEXT('.'), DotPos))
+					{
+						IntPart = NumStr.Left(DotPos);
+						FracPart = NumStr.Mid(DotPos);
+					}
+					else
+					{
+						IntPart = NumStr;
+					}
+					FString WithSeparators;
+					int32 Count = 0;
+					for (int32 j = IntPart.Len() - 1; j >= 0; j--)
+					{
+						if (Count > 0 && Count % 3 == 0) WithSeparators = TEXT(",") + WithSeparators;
+						WithSeparators = FString(1, &IntPart[j]) + WithSeparators;
+						Count++;
+					}
+					Formatted = (NumValue < 0 ? TEXT("-") : TEXT("")) + WithSeparators + FracPart;
+					break;
+				}
+				case TEXT('D'): // Decimal integer
+				{
+					int32 Width = Precision >= 0 ? Precision : 1;
+					Formatted = FString::Printf(TEXT("%0*d"), Width, FMath::RoundToInt(NumValue));
+					break;
+				}
+				case TEXT('P'): // Percent
+				{
+					int32 DecPlaces = Precision >= 0 ? Precision : 2;
+					Formatted = FString::Printf(TEXT("%.*f %%"), DecPlaces, NumValue * 100.0f);
+					break;
+				}
+				case TEXT('E'): // Scientific
+					Formatted = FString::Printf(TEXT("%.*e"), Precision >= 0 ? Precision : 6, NumValue);
+					break;
+				case TEXT('G'): // General format - shortest representation
+					Formatted = FString::Printf(TEXT("%.*G"), Precision >= 0 ? Precision : 7, NumValue);
+					break;
+				case TEXT('X'): // Hexadecimal
+				{
+					int32 IntVal = FMath::RoundToInt(NumValue);
+					int32 Width = Precision >= 0 ? Precision : 0;
+					if (Specifier.Len() > 0 && FChar::IsLower(Specifier[0]))
+					{
+						Formatted = FString::Printf(TEXT("%0*x"), Width, IntVal);
+					}
+					else
+					{
+						Formatted = FString::Printf(TEXT("%0*X"), Width, IntVal);
+					}
+					break;
+				}
+				case TEXT('C'): // Currency
+				{
+					int32 DecPlaces = Precision >= 0 ? Precision : 2;
+					FString NumStr = FString::Printf(TEXT("%.*f"), DecPlaces, FMath::Abs(NumValue));
+					int32 DotPos;
+					FString IntPart, FracPart;
+					if (NumStr.FindChar(TEXT('.'), DotPos))
+					{
+						IntPart = NumStr.Left(DotPos);
+						FracPart = NumStr.Mid(DotPos);
+					}
+					else
+					{
+						IntPart = NumStr;
+					}
+					FString WithSeparators;
+					int32 SepCount = 0;
+					for (int32 j = IntPart.Len() - 1; j >= 0; j--)
+					{
+						if (SepCount > 0 && SepCount % 3 == 0) WithSeparators = TEXT(",") + WithSeparators;
+						WithSeparators = FString(1, &IntPart[j]) + WithSeparators;
+						SepCount++;
+					}
+					Formatted = (NumValue < 0 ? TEXT("($") : TEXT("$")) + WithSeparators + FracPart + (NumValue < 0 ? TEXT(")") : TEXT(""));
+					break;
+				}
+				case TEXT('R'): // Round-trip - preserve full float precision
+					Formatted = FString::Printf(TEXT("%.9G"), NumValue);
+					break;
+				default: // Unknown specifier - use general format
+					Formatted = FString::Printf(TEXT("%.7G"), NumValue);
+					break;
+				}
+
+				FString Result = FormatString.Replace(*Placeholder, *Formatted);
+				return FYarnValue(Result);
+			}
+		}
+	}
+
+	// No format specifier - simple {0} replacement
+	FString ArgString = Params[1].ConvertToString();
+	FString Result = FormatString.Replace(TEXT("{0}"), *ArgString);
+	return FYarnValue(Result);
+}
+
 void UYarnDialogueRunner::RegisterBuiltInFunctions()
 {
 	// ============================================
@@ -1121,161 +1277,11 @@ void UYarnDialogueRunner::RegisterBuiltInFunctions()
 
 	// format_invariant(v) - formats a number using invariant culture
 	// Critical for embedding numbers in commands that need consistent formatting
-	AddFunction(TEXT("format_invariant"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
-		if (Params.Num() < 1) return FYarnValue(FString());
-		float Value = Params[0].ConvertToNumber();
-		// Uses "G" format with 7 significant digits.
-		// Outputs integers without a decimal point; uses scientific notation for very large/small values.
-		return FYarnValue(FString::Printf(TEXT("%.7G"), Value));
-	}, 1);
+	AddFunction(TEXT("format_invariant"), &YarnFn_FormatInvariant, 1);
 
 	// format(formatString, argument) - formats a value using the format string
 	// Supports .NET-style format specifiers: {0}, {0:F2}, {0:N0}, {0:D4}, etc.
-	AddFunction(TEXT("format"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
-		if (Params.Num() < 2) return FYarnValue(FString());
-		FString FormatString = Params[0].ConvertToString();
-
-		// Check if there's a format specifier: {0:spec}
-		int32 ColonPos = INDEX_NONE;
-		int32 BraceStart = FormatString.Find(TEXT("{0"));
-		if (BraceStart != INDEX_NONE)
-		{
-			int32 BraceEnd = FormatString.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, BraceStart);
-			if (BraceEnd != INDEX_NONE)
-			{
-				FString PlaceholderContent = FormatString.Mid(BraceStart + 1, BraceEnd - BraceStart - 1);
-				int32 LocalColon;
-				if (PlaceholderContent.FindChar(TEXT(':'), LocalColon))
-				{
-					ColonPos = BraceStart + 1 + LocalColon;
-				}
-			}
-		}
-
-		if (ColonPos != INDEX_NONE)
-		{
-			// Has format specifier - extract it
-			int32 BraceEnd = FormatString.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ColonPos);
-			if (BraceEnd != INDEX_NONE)
-			{
-				FString Specifier = FormatString.Mid(ColonPos + 1, BraceEnd - ColonPos - 1);
-				FString Placeholder = FormatString.Mid(BraceStart, BraceEnd - BraceStart + 1);
-				FString Formatted;
-
-				float NumValue = Params[1].ConvertToNumber();
-				TCHAR SpecChar = Specifier.Len() > 0 ? FChar::ToUpper(Specifier[0]) : TEXT('G');
-				int32 Precision = Specifier.Len() > 1 ? FCString::Atoi(*Specifier.Mid(1)) : -1;
-
-				switch (SpecChar)
-				{
-				case TEXT('F'): // Fixed-point
-					Formatted = FString::Printf(TEXT("%.*f"), Precision >= 0 ? Precision : 2, NumValue);
-					break;
-				case TEXT('N'): // Number with thousand separators
-				{
-					int32 DecPlaces = Precision >= 0 ? Precision : 2;
-					FString NumStr = FString::Printf(TEXT("%.*f"), DecPlaces, FMath::Abs(NumValue));
-					// Add thousand separators to integer part
-					int32 DotPos;
-					FString IntPart, FracPart;
-					if (NumStr.FindChar(TEXT('.'), DotPos))
-					{
-						IntPart = NumStr.Left(DotPos);
-						FracPart = NumStr.Mid(DotPos);
-					}
-					else
-					{
-						IntPart = NumStr;
-					}
-					FString WithSeparators;
-					int32 Count = 0;
-					for (int32 j = IntPart.Len() - 1; j >= 0; j--)
-					{
-						if (Count > 0 && Count % 3 == 0) WithSeparators = TEXT(",") + WithSeparators;
-						WithSeparators = FString(1, &IntPart[j]) + WithSeparators;
-						Count++;
-					}
-					Formatted = (NumValue < 0 ? TEXT("-") : TEXT("")) + WithSeparators + FracPart;
-					break;
-				}
-				case TEXT('D'): // Decimal integer
-				{
-					int32 Width = Precision >= 0 ? Precision : 1;
-					Formatted = FString::Printf(TEXT("%0*d"), Width, FMath::RoundToInt(NumValue));
-					break;
-				}
-				case TEXT('P'): // Percent
-				{
-					int32 DecPlaces = Precision >= 0 ? Precision : 2;
-					Formatted = FString::Printf(TEXT("%.*f %%"), DecPlaces, NumValue * 100.0f);
-					break;
-				}
-				case TEXT('E'): // Scientific
-					Formatted = FString::Printf(TEXT("%.*e"), Precision >= 0 ? Precision : 6, NumValue);
-					break;
-				case TEXT('G'): // General format - shortest representation
-					Formatted = FString::Printf(TEXT("%.*G"), Precision >= 0 ? Precision : 7, NumValue);
-					break;
-				case TEXT('X'): // Hexadecimal
-				{
-					int32 IntVal = FMath::RoundToInt(NumValue);
-					int32 Width = Precision >= 0 ? Precision : 0;
-					if (Specifier.Len() > 0 && FChar::IsLower(Specifier[0]))
-					{
-						// lowercase x
-						Formatted = FString::Printf(TEXT("%0*x"), Width, IntVal);
-					}
-					else
-					{
-						// uppercase X
-						Formatted = FString::Printf(TEXT("%0*X"), Width, IntVal);
-					}
-					break;
-				}
-				case TEXT('C'): // Currency
-				{
-					int32 DecPlaces = Precision >= 0 ? Precision : 2;
-					FString NumStr = FString::Printf(TEXT("%.*f"), DecPlaces, FMath::Abs(NumValue));
-					int32 DotPos;
-					FString IntPart, FracPart;
-					if (NumStr.FindChar(TEXT('.'), DotPos))
-					{
-						IntPart = NumStr.Left(DotPos);
-						FracPart = NumStr.Mid(DotPos);
-					}
-					else
-					{
-						IntPart = NumStr;
-					}
-					FString WithSeparators;
-					int32 SepCount = 0;
-					for (int32 j = IntPart.Len() - 1; j >= 0; j--)
-					{
-						if (SepCount > 0 && SepCount % 3 == 0) WithSeparators = TEXT(",") + WithSeparators;
-						WithSeparators = FString(1, &IntPart[j]) + WithSeparators;
-						SepCount++;
-					}
-					Formatted = (NumValue < 0 ? TEXT("($") : TEXT("$")) + WithSeparators + FracPart + (NumValue < 0 ? TEXT(")") : TEXT(""));
-					break;
-				}
-				case TEXT('R'): // Round-trip - preserve full float precision
-					Formatted = FString::Printf(TEXT("%.9G"), NumValue);
-					break;
-				default: // Unknown specifier - use general format
-					Formatted = FString::Printf(TEXT("%.7G"), NumValue);
-					break;
-				}
-
-				FString Result = FormatString.Replace(*Placeholder, *Formatted);
-				return FYarnValue(Result);
-			}
-		}
-
-		// No format specifier - simple {0} replacement
-		FString ArgString = Params[1].ConvertToString();
-		FString Result = FormatString.Replace(TEXT("{0}"), *ArgString);
-		return FYarnValue(Result);
-	}, 2);
+	AddFunction(TEXT("format"), &YarnFn_Format, 2);
 
 	// ============================================
 	// SALIENCY FUNCTIONS

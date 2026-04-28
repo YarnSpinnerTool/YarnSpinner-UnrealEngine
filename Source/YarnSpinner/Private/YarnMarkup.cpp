@@ -180,7 +180,7 @@ FYarnMarkupReplacementResult UYarnStyleMarkupProcessor::ProcessMarkup_Implementa
 		// Try using the first property value as the style name
 		for (const auto& Pair : Attribute.Properties)
 		{
-			StyleName = Pair.Value;
+			StyleName = Pair.Value.ToString();
 			break;
 		}
 	}

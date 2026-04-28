@@ -41,16 +41,14 @@ namespace
 		return Result;
 	}
 
-	/**
-	 * Resolve sourceFiles glob patterns from a .yarnproject into absolute file paths.
-	 * Matches the behaviour of Microsoft.Extensions.FileSystemGlobbing used by the
-	 * Yarn Spinner compiler:
-	 * - "**\/*.yarn" matches recursively
-	 * - "*.yarn" matches in project directory only
-	 * - "Dir/*.yarn" matches in a specific subdirectory
-	 * - Absolute paths with .yarn extension are added directly
-	 * - excludeFiles patterns are subtracted from the results
-	 */
+	// Resolve sourceFiles glob patterns from a .yarnproject into absolute file paths.
+	// Matches the behaviour of Microsoft.Extensions.FileSystemGlobbing used by the
+	// Yarn Spinner compiler:
+	// - "**" + "/*.yarn" matches recursively
+	// - "*.yarn" matches in project directory only
+	// - "Dir" + "/*.yarn" matches in a specific subdirectory
+	// - Absolute paths with .yarn extension are added directly
+	// - excludeFiles patterns are subtracted from the results
 	TArray<FString> ResolveSourceFileGlobs(const TArray<FString>& IncludePatterns,
 		const TArray<FString>& ExcludePatterns, const FString& ProjectDir)
 	{
