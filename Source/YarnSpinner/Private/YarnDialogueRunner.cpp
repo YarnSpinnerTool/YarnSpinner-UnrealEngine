@@ -785,7 +785,7 @@ static FYarnValue YarnFn_FormatInvariant(const TArray<FYarnValue>& Params)
 	float Value = Params[0].ConvertToNumber();
 	// Uses "G" format with 7 significant digits.
 	// Outputs integers without a decimal point; uses scientific notation for very large/small values.
-	return FYarnValue(FString::Printf(TEXT("%.7G"), Value));
+	return FYarnValue(FString::Printf(TEXT("%.7g"), Value));
 }
 
 static FYarnValue YarnFn_Format(const TArray<FYarnValue>& Params)
@@ -870,7 +870,7 @@ static FYarnValue YarnFn_Format(const TArray<FYarnValue>& Params)
 					Formatted = FString::Printf(TEXT("%.*e"), Precision >= 0 ? Precision : 6, NumValue);
 					break;
 				case TEXT('G'): // General format - shortest representation
-					Formatted = FString::Printf(TEXT("%.*G"), Precision >= 0 ? Precision : 7, NumValue);
+					Formatted = FString::Printf(TEXT("%.*g"), Precision >= 0 ? Precision : 7, NumValue);
 					break;
 				case TEXT('X'): // Hexadecimal
 				{
@@ -913,10 +913,10 @@ static FYarnValue YarnFn_Format(const TArray<FYarnValue>& Params)
 					break;
 				}
 				case TEXT('R'): // Round-trip - preserve full float precision
-					Formatted = FString::Printf(TEXT("%.9G"), NumValue);
+					Formatted = FString::Printf(TEXT("%.9g"), NumValue);
 					break;
 				default: // Unknown specifier - use general format
-					Formatted = FString::Printf(TEXT("%.7G"), NumValue);
+					Formatted = FString::Printf(TEXT("%.7g"), NumValue);
 					break;
 				}
 
