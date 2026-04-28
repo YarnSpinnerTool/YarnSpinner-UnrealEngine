@@ -1330,7 +1330,7 @@ void UYarnDialogueRunner::RegisterBuiltInFunctions()
 		}
 
 		// Check if any candidate can be selected by the saliency strategy
-		if (!ActiveSaliencyStrategy.GetInterface())
+		if (!ActiveSaliencyStrategy.GetObject())
 		{
 			// No strategy means we can't determine - assume content exists
 			return FYarnValue(true);
@@ -1412,7 +1412,7 @@ void UYarnDialogueRunner::CreateSaliencyStrategy()
 {
 	// Honour a strategy that was installed externally (via SetSaliencyStrategy)
 	// before BeginPlay/lazy init - don't clobber it.
-	if (ActiveSaliencyStrategy.GetInterface())
+	if (ActiveSaliencyStrategy.GetObject())
 	{
 		return;
 	}
@@ -1441,12 +1441,12 @@ void UYarnDialogueRunner::HandleAddSaliencyCandidate(const FYarnSaliencyCandidat
 
 bool UYarnDialogueRunner::HandleSelectSaliencyCandidate(FYarnSaliencyCandidate& OutSelectedCandidate)
 {
-	if (!ActiveSaliencyStrategy.GetInterface())
+	if (!ActiveSaliencyStrategy.GetObject())
 	{
 		CreateSaliencyStrategy();
 	}
 
-	if (!ActiveSaliencyStrategy.GetInterface())
+	if (!ActiveSaliencyStrategy.GetObject())
 	{
 		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: No saliency strategy available"));
 		return false;
@@ -1480,12 +1480,12 @@ bool UYarnDialogueRunner::HandleSelectSaliencyCandidate(FYarnSaliencyCandidate& 
 
 bool UYarnDialogueRunner::HandleVMSelectSaliencyCandidate(const TArray<FYarnSaliencyCandidate>& Candidates, FYarnSaliencyCandidate& OutSelectedCandidate)
 {
-	if (!ActiveSaliencyStrategy.GetInterface())
+	if (!ActiveSaliencyStrategy.GetObject())
 	{
 		CreateSaliencyStrategy();
 	}
 
-	if (!ActiveSaliencyStrategy.GetInterface())
+	if (!ActiveSaliencyStrategy.GetObject())
 	{
 		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: No saliency strategy available for VM selection"));
 		return false;
@@ -1518,7 +1518,7 @@ void UYarnDialogueRunner::HandleContentWasSelected(const FYarnSaliencyCandidate&
 {
 	// Called by the VM after it validates the selection.
 	// Notifies the strategy that content was selected (for LeastRecentlyViewed tracking).
-	if (ActiveSaliencyStrategy.GetInterface())
+	if (ActiveSaliencyStrategy.GetObject())
 	{
 		IYarnSaliencyStrategy::Execute_ContentWasSelected(ActiveSaliencyStrategy.GetObject(), SelectedCandidate);
 
