@@ -75,10 +75,15 @@ void UYarnLinePresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, 
 	FString TextToDisplay;
 	FString CharacterName = Line.CharacterName;
 
+	// Always use TextWithoutCharacterName for the body so that custom line
+	// providers that rewrite CharacterName (e.g. casting) aren't bypassed by
+	// the speaker prefix that Line.Text still carries.
+	const FString BodyText = Line.TextWithoutCharacterName.ToString();
+
 	if (CharacterNameWidget)
 	{
 		// separate character name widget is configured
-		TextToDisplay = Line.Text.ToString();
+		TextToDisplay = BodyText;
 
 		if (!CharacterName.IsEmpty())
 		{
@@ -95,11 +100,11 @@ void UYarnLinePresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, 
 		// no separate character name widget
 		if (bShowCharacterNameInLine && !CharacterName.IsEmpty())
 		{
-			TextToDisplay = FString::Printf(TEXT("%s: %s"), *CharacterName, *Line.Text.ToString());
+			TextToDisplay = FString::Printf(TEXT("%s: %s"), *CharacterName, *BodyText);
 		}
 		else
 		{
-			TextToDisplay = Line.Text.ToString();
+			TextToDisplay = BodyText;
 		}
 		SetCharacterNameVisible(false);
 	}

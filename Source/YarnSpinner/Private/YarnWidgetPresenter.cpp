@@ -134,11 +134,14 @@ void UYarnWidgetPresenter::OnDialogueComplete_Implementation()
 void UYarnWidgetPresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, bool bCanHurry)
 {
 	UE_LOG(LogYarnSpinner, Log, TEXT("YarnWidgetPresenter: RunLine Character='%s' Text='%s'"),
-		*Line.CharacterName, *Line.Text.ToString());
+		*Line.CharacterName, *Line.TextWithoutCharacterName.ToString());
 
 	if (DialogueWidget)
 	{
-		DialogueWidget->ShowLine(Line.CharacterName, Line.Text.ToString(), TypewriterSpeed > 0);
+		// Body uses TextWithoutCharacterName so custom line providers that
+		// rewrite CharacterName aren't bypassed by the original speaker prefix
+		// still embedded in Line.Text.
+		DialogueWidget->ShowLine(Line.CharacterName, Line.TextWithoutCharacterName.ToString(), TypewriterSpeed > 0);
 	}
 	else
 	{

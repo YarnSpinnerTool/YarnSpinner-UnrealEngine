@@ -522,18 +522,7 @@ void AYarnSimpleDialogueDemo::OnLineReceived(const FYarnLocalizedLine& Line)
 {
     if (DialogueWidget)
     {
-        // Extract character name from "Character: text" format
-        FString CharacterName;
-        FString Text = Line.Text.ToString();
-
-        int32 ColonIndex;
-        if (Text.FindChar(TEXT(':'), ColonIndex) && ColonIndex < 30)
-        {
-            CharacterName = Text.Left(ColonIndex).TrimStartAndEnd();
-            Text = Text.Mid(ColonIndex + 1).TrimStart();
-        }
-
-        DialogueWidget->ShowLine(CharacterName, Text);
+        DialogueWidget->ShowLine(Line.CharacterName, Line.TextWithoutCharacterName.ToString());
     }
 }
 
@@ -631,17 +620,7 @@ void AYarnRPGDialogueDemo::OnLineReceived(const FYarnLocalizedLine& Line)
 {
     if (DialogueWidget)
     {
-        FString CharacterName;
-        FString Text = Line.Text.ToString();
-
-        int32 ColonIndex;
-        if (Text.FindChar(TEXT(':'), ColonIndex) && ColonIndex < 30)
-        {
-            CharacterName = Text.Left(ColonIndex).TrimStartAndEnd();
-            Text = Text.Mid(ColonIndex + 1).TrimStart();
-        }
-
-        DialogueWidget->ShowLine(CharacterName, Text);
+        DialogueWidget->ShowLine(Line.CharacterName, Line.TextWithoutCharacterName.ToString());
     }
 }
 
@@ -736,17 +715,7 @@ void AYarnSubtitleDemo::OnLineReceived(const FYarnLocalizedLine& Line)
 {
     if (SubtitleWidget)
     {
-        FString CharacterName;
-        FString Text = Line.Text.ToString();
-
-        int32 ColonIndex;
-        if (Text.FindChar(TEXT(':'), ColonIndex) && ColonIndex < 30)
-        {
-            CharacterName = Text.Left(ColonIndex).TrimStartAndEnd();
-            Text = Text.Mid(ColonIndex + 1).TrimStart();
-        }
-
-        SubtitleWidget->ShowSubtitle(CharacterName, Text);
+        SubtitleWidget->ShowSubtitle(Line.CharacterName, Line.TextWithoutCharacterName.ToString());
 
         // Auto-advance after the subtitle duration for a voice-over experience
         if (SubtitleDuration > 0.0f)
