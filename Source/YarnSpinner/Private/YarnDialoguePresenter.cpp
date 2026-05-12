@@ -252,7 +252,9 @@ void UYarnDialoguePresenter::StartAutoAdvanceTimer()
 
 	CancelAutoAdvanceTimer();
 
-	int32 CharCount = CurrentLine.Text.ToString().Len();
+	// Use TextWithoutCharacterName so the auto-advance delay reflects only
+	// the body the player is reading, not the speaker prefix.
+	int32 CharCount = CurrentLine.TextWithoutCharacterName.ToString().Len();
 	float Delay = CalculateAutoAdvanceDelay(CharCount);
 
 	if (UWorld* World = GetWorld())
