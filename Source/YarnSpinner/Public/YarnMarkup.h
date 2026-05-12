@@ -18,8 +18,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/Interface.h"
+
+#include "Components/ActorComponent.h"
 #include "Engine/DataAsset.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
+#include "UObject/Interface.h"
+
 #include "YarnMarkup.generated.h"
 
 /**

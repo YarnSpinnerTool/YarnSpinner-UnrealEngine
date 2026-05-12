@@ -53,6 +53,7 @@
 #include "Components/ActorComponent.h"
 
 // Version detection for cross-engine compatibility.
+#include "InputCoreTypes.h"
 #include "YarnSpinnerVersion.h"
 
 // UInputAction - for Enhanced Input System support (UE5+ only).
