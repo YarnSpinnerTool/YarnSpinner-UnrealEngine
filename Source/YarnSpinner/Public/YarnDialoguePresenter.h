@@ -35,6 +35,11 @@
 // requested hurry-up or skip.
 #include "YarnCancellationToken.h"
 
+// EYarnLineCompletionRequest, FOnYarnLineFinished, FOnYarnOptionSelected.
+// The completion-request enum and the two delegates that flow between a
+// presenter and whoever is driving it (runner or wrapper).
+#include "YarnPresenterTypes.h"
+
 // Required by Unreal's reflection system
 #include "YarnDialoguePresenter.generated.h"
 
@@ -213,12 +218,36 @@ public:
 	/**
 	 * call this when you've finished presenting a line.
 	 *
-	 * this tells the dialogue runner that this presenter is done with the
-	 * current line. the runner waits for ALL presenters to call this before
-	 * moving to the next content.
+	 * the runner waits for all presenters on the line to signal completion
+	 * before moving on. this version makes no request about whether the line
+	 * itself should end - other presenters carry on as they would.
+	 *
+	 * use this for "I did my thing" completions: a typewriter finishing its
+	 * text, a particle trigger that fired, a facial expression that applied.
+	 *
+	 * if your completion is the reason the *line* should end (e.g. a voice
+	 * over finishing its audio), call OnLinePresentationCompleteAndEndLine
+	 * instead.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Presenter")
 	void OnLinePresentationComplete();
+
+	/**
+	 * call this when you've finished AND you'd like the line to end now.
+	 *
+	 * intended for presenters whose timing drives the line: a voice over
+	 * whose audio reached its natural end, a cutscene that completed. the
+	 * runner cancels the current-content source on receipt, which causes
+	 * the other presenters' tokens to flip cancelled. they wrap up and
+	 * signal in turn.
+	 *
+	 * only call this when your *natural* completion drove the line. if you
+	 * were cut short by an external cancel (your token was already flipped
+	 * when you noticed), call OnLinePresentationComplete instead - the line
+	 * is already ending for some other reason.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Presenter")
+	void OnLinePresentationCompleteAndEndLine();
 
 	/**
 	 * call this when the player selects an option.
@@ -239,12 +268,21 @@ public:
 	void RequestContinue();
 
 	// ========================================================================
-	// dialogue runner access
+	// dialogue runner access (legacy)
 	// ========================================================================
+	// Predates the delegate-passing flow. The new flow gives a presenter
+	// everything it needs (line, token, completion callback) via its
+	// Internal_RunLine entry point, so a presenter typically has no reason
+	// to reach back to the runner. The accessor is kept for code that still
+	// does - mainly old Blueprint subclasses calling GetDialogueRunner to
+	// pull state off the runner.
 
 	/**
-	 * get the dialogue runner this presenter is attached to.
-	 * @return the dialogue runner, or nullptr if not attached.
+	 * Get the dialogue runner this presenter is attached to.
+	 *
+	 * Legacy. Prefer the token + completion callback supplied to
+	 * Internal_RunLine. Returns nullptr if no runner has registered this
+	 * presenter.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Presenter")
 	UYarnDialogueRunner* GetDialogueRunner() const { return DialogueRunner; }
@@ -382,7 +420,10 @@ protected:
 	// ========================================================================
 	// These are accessible from subclasses and blueprint-readable for debugging.
 
-	/** the dialogue runner this presenter is attached to. set by the runner. */
+	/** Back-pointer to the runner that registered this presenter.
+	 *  Legacy: the new flow doesn't use this. Kept around for the legacy
+	 *  fallback paths in OnLinePresentationComplete and friends, and for
+	 *  the BlueprintCallable GetDialogueRunner accessor. */
 	UPROPERTY()
 	UYarnDialogueRunner* DialogueRunner;
 
@@ -402,17 +443,58 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Presenter")
 	FYarnOptionSet CurrentOptions;
 
+	// ------------------------------------------------------------------------
+	// State carried for the duration of one RunLine/RunOptions call
+	// ------------------------------------------------------------------------
+	// The token and completion callback are passed in by whoever called
+	// Internal_RunLine. We hold them here so the BlueprintNativeEvent
+	// RunLine (which can't grow its parameter list without breaking
+	// existing Blueprint subclasses) and the convenience completion methods
+	// can find them.
+	//
+	// A wrapper (a presenter that wraps other presenters) can read these
+	// directly to know what it was asked to do and how to report back.
+
+	/** Token whose cancellation should govern this line's presentation. */
+	FYarnLineCancellationToken CurrentLineCancellationToken;
+
+	/** Token whose cancellation should govern the current options block. */
+	FYarnLineCancellationToken CurrentOptionsCancellationToken;
+
+	/** The callback to fire when the line is done. Cleared after firing. */
+	FOnYarnLineFinished CurrentLineFinishedCallback;
+
+	/** The callback to fire when an option is chosen. Cleared after firing. */
+	FOnYarnOptionSelected CurrentOptionSelectedCallback;
+
 	// Dialogue runner needs access to internal methods
 	friend class UYarnDialogueRunner;
 
 	/** set the dialogue runner (called by the runner when presenter is registered) */
 	void SetDialogueRunner(UYarnDialogueRunner* Runner);
 
-	/** internal method to start line presentation. sets up state before calling RunLine. */
-	void Internal_RunLine(const FYarnLocalizedLine& Line, bool bCanHurry);
+	/**
+	 * Called by the runner or by a wrapping presenter to start a line.
+	 *
+	 * Stores Token and OnFinished as instance state for the duration of
+	 * this line, then invokes the BlueprintNativeEvent RunLine so any
+	 * existing Blueprint override fires the same way it always did.
+	 *
+	 * Virtual so wrappers can override the dispatch behaviour (e.g. an
+	 * interruption presenter that drives multiple subordinates).
+	 */
+	virtual void Internal_RunLine(const FYarnLocalizedLine& Line,
+	                              bool bCanHurry,
+	                              const FYarnLineCancellationToken& Token,
+	                              const FOnYarnLineFinished& OnFinished);
 
-	/** internal method to start options presentation. sets up state before calling RunOptions. */
-	void Internal_RunOptions(const FYarnOptionSet& Options);
+	/**
+	 * Called by the runner or by a wrapping presenter to start an options
+	 * block. Same shape as Internal_RunLine.
+	 */
+	virtual void Internal_RunOptions(const FYarnOptionSet& Options,
+	                                 const FYarnLineCancellationToken& Token,
+	                                 const FOnYarnOptionSelected& OnSelected);
 
 private:
 	// ========================================================================

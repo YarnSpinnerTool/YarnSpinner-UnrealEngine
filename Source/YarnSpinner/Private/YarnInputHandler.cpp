@@ -126,8 +126,10 @@ void UYarnInputHandler::ProcessAdvanceInput()
 	// check if we should hurry up first
 	if (bHurryUpBeforeAdvance)
 	{
-		// check if line is still being displayed (typewriter active)
-		FYarnLineCancellationToken& Token = DialogueRunner->GetCurrentCancellationToken();
+		// First press hurries up; second press advances. Tokens are now
+		// lightweight handles, so take a copy rather than a reference; the
+		// underlying state still lives in the runner's cancellation source.
+		FYarnLineCancellationToken Token = DialogueRunner->GetCurrentCancellationToken();
 
 		if (!Token.IsHurryUpRequested())
 		{

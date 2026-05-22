@@ -382,12 +382,25 @@ void UYarnVoiceOverPresenter::CompleteLine()
 	// naturally or was interrupted and faded out)
 	OnVoiceOverComplete.Broadcast();
 
-	// if configured to control line advancement, tell the dialogue runner
-	// we're done. otherwise, let another presenter or manual input control
-	// when to advance.
-	if (bEndLineWhenVoiceOverComplete)
+	if (!bEndLineWhenVoiceOverComplete)
+	{
+		// We're not driving line completion - let another presenter (or
+		// manual input) decide when to advance. Existing behaviour.
+		return;
+	}
+
+	// We are driving. The question is whether our completion came because
+	// the audio reached its natural end (we drove the line) or because
+	// someone cancelled us mid-play (the line was already ending). The
+	// token tells us: if it's already cancelled, we were a passenger;
+	// otherwise, we're the reason the line is over.
+	if (CurrentLineCancellationToken.IsCancellationRequested())
 	{
 		OnLinePresentationComplete();
+	}
+	else
+	{
+		OnLinePresentationCompleteAndEndLine();
 	}
 }
 

@@ -24,6 +24,32 @@
 #include "TimerManager.h"
 #include <cmath>
 
+namespace
+{
+	// Build a fresh per-content cancellation source linked to the dialogue
+	// source. Called whenever a new line or options block starts: the previous
+	// content source becomes garbage (the UPROPERTY anchor moves to the new
+	// one) and any wrappers that built linked children off it observe its
+	// abandonment naturally.
+	//
+	// Previous is the source being replaced. We retire it explicitly so it
+	// stops holding cancel/hurry subscriptions on the dialogue source -
+	// otherwise those pile up (one pair per line) until GC.
+	UYarnCancellationTokenSource* MakeLinkedContentSource(UObject* Outer, UYarnCancellationTokenSource* DialogueSource, UYarnCancellationTokenSource* Previous)
+	{
+		if (Previous)
+		{
+			Previous->UnlinkFromParents();
+		}
+		TArray<FYarnLineCancellationToken> Parents;
+		if (DialogueSource)
+		{
+			Parents.Add(DialogueSource->GetToken());
+		}
+		return UYarnCancellationTokenSource::CreateLinkedTokenSource(Outer, Parents);
+	}
+}
+
 UYarnDialogueRunner::UYarnDialogueRunner()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -61,11 +87,13 @@ void UYarnDialogueRunner::BeginPlay()
 	SetupVirtualMachine();
 	RegisterBuiltInFunctions();
 
-	// Create cancellation token source for lines
-	CancellationTokenSource = NewObject<UYarnCancellationTokenSource>(this);
-
-	// Create cancellation token source for options
-	OptionsCancellationTokenSource = NewObject<UYarnCancellationTokenSource>(this);
+	// Dialogue-level cancellation source. Lives for the whole conversation.
+	// Per-line and per-options sources will be created lazily, linked to
+	// this one, so cancelling the dialogue cascades down to anyone observing
+	// a content token.
+	DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+	CancellationTokenSource = nullptr;
+	OptionsCancellationTokenSource = nullptr;
 
 	// Create saliency strategy
 	CreateSaliencyStrategy();
@@ -136,15 +164,13 @@ void UYarnDialogueRunner::SetYarnProject(UYarnProject* NewYarnProject)
 	PendingSelectedOptionIndex = -1;
 	SaliencyCandidates.Empty();
 
-	// Reset cancellation tokens
-	if (CancellationTokenSource)
-	{
-		CancellationTokenSource->GetToken();
-	}
-	if (OptionsCancellationTokenSource)
-	{
-		OptionsCancellationTokenSource->GetToken();
-	}
+	// Switching projects effectively ends any current dialogue. Drop the
+	// dialogue source (creating a fresh one ready for the next StartDialogue)
+	// and clear the per-content sources so the next HandleLine/HandleOptions
+	// makes fresh ones linked to the new dialogue source.
+	DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+	CancellationTokenSource = nullptr;
+	OptionsCancellationTokenSource = nullptr;
 }
 
 void UYarnDialogueRunner::SetupVirtualMachine()
@@ -201,8 +227,14 @@ void UYarnDialogueRunner::StartDialogue(const FString& NodeName)
 		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Node '%s' found with %d instructions"), *NodeName, Node->Instructions.Num());
 	}
 
-	bHurryUpRequested = false;
-	bNextLineRequested = false;
+	// Each conversation gets a fresh dialogue-level cancellation source.
+	// The previous one may have been cancelled by a previous StopDialogue;
+	// we don't want a brand-new dialogue to start out cancelled. Per-content
+	// sources are nulled out and rebuilt on the first HandleLine /
+	// HandleOptions so they link to the new dialogue source.
+	DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+	CancellationTokenSource = nullptr;
+	OptionsCancellationTokenSource = nullptr;
 
 	// Events fire before presenters are notified
 	OnDialogueStart.Broadcast();
@@ -245,14 +277,13 @@ void UYarnDialogueRunner::StopDialogue()
 		World->GetTimerManager().ClearTimer(WaitTimerHandle);
 	}
 
-	// Cancel all cancellation tokens so presenters know to stop
-	if (CancellationTokenSource)
+	// Cancel the dialogue source. Linked per-line and per-options sources
+	// see this and cascade automatically, so we don't need to cancel them
+	// individually. Anyone holding a token observing those — presenters,
+	// wrapper-built linked sources, markup handlers — sees cancellation.
+	if (DialogueCancellationSource)
 	{
-		CancellationTokenSource->CancelAll();
-	}
-	if (OptionsCancellationTokenSource)
-	{
-		OptionsCancellationTokenSource->CancelAll();
+		DialogueCancellationSource->Cancel();
 	}
 
 	// Stop() will trigger DialogueCompleteHandler which notifies presenters
@@ -285,9 +316,9 @@ void UYarnDialogueRunner::Continue()
 
 void UYarnDialogueRunner::RequestHurryUp()
 {
-	bHurryUpRequested = true;
-
-	// Mark hurry-up on the cancellation token
+	// Set hurry-up on the per-content source. Tokens observing it now read
+	// IsHurryUpRequested true; linked child sources (wrapper presenters etc)
+	// see it via the cascade.
 	if (CancellationTokenSource)
 	{
 		CancellationTokenSource->RequestHurryUp();
@@ -306,12 +337,12 @@ void UYarnDialogueRunner::RequestHurryUp()
 
 void UYarnDialogueRunner::RequestNextLine()
 {
-	bNextLineRequested = true;
-
-	// Mark next content on the cancellation token
+	// Cancel the per-content source. Tokens observing it (and tokens
+	// observing any wrapper-built linked children of it) now read
+	// IsCancellationRequested true. Presenters wrap up and signal back.
 	if (CancellationTokenSource)
 	{
-		CancellationTokenSource->RequestNextContent();
+		CancellationTokenSource->Cancel();
 	}
 
 	// Copy the array to prevent issues if a presenter modifies the list during iteration
@@ -366,13 +397,32 @@ void UYarnDialogueRunner::SelectOption(int32 OptionIndex)
 		// Store the pending option; selection completes when the line presentation finishes
 		PendingSelectedOptionIndex = OptionIndex;
 
-		// When presenters complete, they'll call Continue() which will handle the pending option
+		// Build a fresh line-level cancellation source for replaying the
+		// option as a line. Same shape as HandleLine: linked to the dialogue
+		// source, all presenters share token and callback.
+		CancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, CancellationTokenSource);
+		const FYarnLineCancellationToken LineToken = CancellationTokenSource->GetToken();
+		FOnYarnLineFinished LineCallback;
+		LineCallback.BindDynamic(this, &UYarnDialogueRunner::HandlePresenterLineFinished);
+
+		ActiveLinePresenterCount = 0;
 		TArray<UYarnDialoguePresenter*> PresentersCopy = DialoguePresenters;
 		for (UYarnDialoguePresenter* Presenter : PresentersCopy)
 		{
 			if (Presenter)
 			{
-				Presenter->Internal_RunLine(SelectedOption.Line, true);
+				++ActiveLinePresenterCount;
+			}
+		}
+
+		// When presenters complete, the bound callback lands in
+		// HandlePresenterLineFinished, which calls Continue() when the
+		// count reaches zero. That in turn picks up PendingSelectedOptionIndex.
+		for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+		{
+			if (Presenter)
+			{
+				Presenter->Internal_RunLine(SelectedOption.Line, true, LineToken, LineCallback);
 			}
 		}
 
@@ -399,19 +449,27 @@ void UYarnDialogueRunner::HandleLine(const FYarnLine& Line)
 	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Localised line: Character='%s' Text='%s'"),
 		*LocalizedLine.CharacterName, *LocalizedLine.Text.ToString());
 
-	bHurryUpRequested = false;
-	bNextLineRequested = false;
+	// Fresh per-line source linked to the dialogue source. The previous
+	// line's source (if any) loses its UPROPERTY anchor here and is eligible
+	// for GC. Presenters holding stale tokens from prior lines will see a
+	// dead source, which reports "not cancelled" — fine, because they
+	// shouldn't be checking after their line finished anyway.
+	CancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, CancellationTokenSource);
 
-	// Create a fresh cancellation token for this line
-	if (CancellationTokenSource)
-	{
-		CancellationTokenSource->GetToken(); // Reset the token for the new line
-	}
+	// Build the token + callback the presenters will receive. Every
+	// presenter on this line gets the *same* token (they're all observing
+	// the same content source) and the *same* callback (we'll get one call
+	// per presenter, and the count tells us when everyone is done).
+	const FYarnLineCancellationToken LineToken = CancellationTokenSource->GetToken();
+	FOnYarnLineFinished LineCallback;
+	LineCallback.BindDynamic(this, &UYarnDialogueRunner::HandlePresenterLineFinished);
 
-	// All presenters must complete before we continue to the next content.
+	// Count first, dispatch second. A presenter whose RunLine completes
+	// synchronously (e.g. a particle-trigger presenter) would otherwise
+	// decrement the count to zero before the rest of the loop has even
+	// dispatched, and we'd Continue too early.
 	ActiveLinePresenterCount = 0;
 
-	// Send to all presenters - copy array to prevent issues if a presenter modifies the list during iteration
 	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Sending to %d presenters"), DialoguePresenters.Num());
 	TArray<UYarnDialoguePresenter*> PresentersCopy = DialoguePresenters;
 	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
@@ -429,7 +487,7 @@ void UYarnDialogueRunner::HandleLine(const FYarnLine& Line)
 		if (Presenter)
 		{
 			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Calling Internal_RunLine on presenter %s"), *Presenter->GetName());
-			Presenter->Internal_RunLine(LocalizedLine, true);
+			Presenter->Internal_RunLine(LocalizedLine, true, LineToken, LineCallback);
 		}
 	}
 
@@ -442,11 +500,31 @@ void UYarnDialogueRunner::HandleLine(const FYarnLine& Line)
 
 void UYarnDialogueRunner::NotifyPresenterLineComplete()
 {
-	ActiveLinePresenterCount--;
+	// Back-compat shim. The new flow goes through the FOnYarnLineFinished
+	// callback, which lands in HandlePresenterLineFinished. Anything calling
+	// us directly (legacy presenters reaching through the runner pointer)
+	// is treated as a no-request "I'm done" completion.
+	HandlePresenterLineFinished(EYarnLineCompletionRequest::None);
+}
+
+void UYarnDialogueRunner::HandlePresenterLineFinished(EYarnLineCompletionRequest Request)
+{
+	--ActiveLinePresenterCount;
 
 	if (bVerboseLogging)
 	{
-		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Presenter line complete (%d remaining)"), ActiveLinePresenterCount);
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Presenter line finished (request=%d, %d remaining)"),
+			(int32)Request, ActiveLinePresenterCount);
+	}
+
+	// Honour an EndLine request by cancelling the content source. Siblings
+	// will see their tokens flip and wrap up; they'll call back into us as
+	// they do, which decrements the count the rest of the way to zero.
+	// Cancel is idempotent, so receiving EndLine from several presenters in
+	// a row does no extra work after the first.
+	if (Request == EYarnLineCompletionRequest::EndLine && CancellationTokenSource)
+	{
+		CancellationTokenSource->Cancel();
 	}
 
 	if (ActiveLinePresenterCount <= 0)
@@ -456,6 +534,24 @@ void UYarnDialogueRunner::NotifyPresenterLineComplete()
 	}
 }
 
+void UYarnDialogueRunner::HandlePresenterOptionSelected(int32 OptionIndex)
+{
+	// The player has chosen, so any other presenters still showing options
+	// are moot. Cancel the options source to tell them to clean up. A
+	// well-behaved option presenter treats a cancelled token as "stop
+	// showing options" and does not itself report a selection, so this
+	// won't cause a second selection to come back.
+	if (OptionsCancellationTokenSource)
+	{
+		OptionsCancellationTokenSource->Cancel();
+	}
+
+	// Forward to the existing SelectOption flow. The runner's book-keeping
+	// around bRunSelectedOptionAsLine, pending selections, and VM dispatch
+	// lives there.
+	SelectOption(OptionIndex);
+}
+
 void UYarnDialogueRunner::HandleOptions(const FYarnOptionSet& Options)
 {
 	if (bVerboseLogging)
@@ -463,11 +559,9 @@ void UYarnDialogueRunner::HandleOptions(const FYarnOptionSet& Options)
 		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Showing %d options"), Options.Options.Num());
 	}
 
-	// Reset options cancellation token for the new options presentation
-	if (OptionsCancellationTokenSource)
-	{
-		OptionsCancellationTokenSource->GetToken(); // Reset the token
-	}
+	// Fresh per-options source linked to the dialogue source. Same lifecycle
+	// rules as the per-line source above.
+	OptionsCancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, OptionsCancellationTokenSource);
 
 	// Localise all options and store for potential use by bRunSelectedOptionAsLine
 	CurrentLocalizedOptions.Options.Empty();
@@ -478,13 +572,20 @@ void UYarnDialogueRunner::HandleOptions(const FYarnOptionSet& Options)
 		CurrentLocalizedOptions.Options.Add(LocalizedOption);
 	}
 
+	// Token and callback for the options block. The same pair goes to every
+	// presenter; the first one whose user picks an option drives the call
+	// back, and SelectOption picks up the rest.
+	const FYarnLineCancellationToken OptionsToken = OptionsCancellationTokenSource->GetToken();
+	FOnYarnOptionSelected OptionsCallback;
+	OptionsCallback.BindDynamic(this, &UYarnDialogueRunner::HandlePresenterOptionSelected);
+
 	// Send to all presenters - copy array to prevent issues if a presenter modifies the list during iteration
 	TArray<UYarnDialoguePresenter*> PresentersCopy = DialoguePresenters;
 	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
 	{
 		if (Presenter)
 		{
-			Presenter->Internal_RunOptions(CurrentLocalizedOptions);
+			Presenter->Internal_RunOptions(CurrentLocalizedOptions, OptionsToken, OptionsCallback);
 		}
 	}
 }
@@ -1370,20 +1471,31 @@ void UYarnDialogueRunner::OnWaitComplete()
 	}
 }
 
-FYarnLineCancellationToken& UYarnDialogueRunner::GetCurrentCancellationToken()
+FYarnLineCancellationToken UYarnDialogueRunner::GetCurrentCancellationToken()
 {
+	// Lazy-create a linked source if asked for a token before HandleLine has
+	// fired. Linking to the dialogue source ensures any dialogue-level
+	// cancellation propagates correctly.
 	if (!CancellationTokenSource)
 	{
-		CancellationTokenSource = NewObject<UYarnCancellationTokenSource>(this);
+		if (!DialogueCancellationSource)
+		{
+			DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+		}
+		CancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, CancellationTokenSource);
 	}
 	return CancellationTokenSource->GetToken();
 }
 
-FYarnLineCancellationToken& UYarnDialogueRunner::GetCurrentOptionsCancellationToken()
+FYarnLineCancellationToken UYarnDialogueRunner::GetCurrentOptionsCancellationToken()
 {
 	if (!OptionsCancellationTokenSource)
 	{
-		OptionsCancellationTokenSource = NewObject<UYarnCancellationTokenSource>(this);
+		if (!DialogueCancellationSource)
+		{
+			DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+		}
+		OptionsCancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, OptionsCancellationTokenSource);
 	}
 	return OptionsCancellationTokenSource->GetToken();
 }
@@ -1395,7 +1507,9 @@ bool UYarnDialogueRunner::IsHurryUpRequested() const
 
 bool UYarnDialogueRunner::IsNextContentRequested() const
 {
-	return CancellationTokenSource ? CancellationTokenSource->IsNextContentRequested() : false;
+	// Method name kept for back-compat with existing presenters; the source's
+	// canonical method is IsCancellationRequested.
+	return CancellationTokenSource ? CancellationTokenSource->IsCancellationRequested() : false;
 }
 
 bool UYarnDialogueRunner::IsOptionHurryUpRequested() const
@@ -1405,7 +1519,7 @@ bool UYarnDialogueRunner::IsOptionHurryUpRequested() const
 
 bool UYarnDialogueRunner::IsOptionNextContentRequested() const
 {
-	return OptionsCancellationTokenSource ? OptionsCancellationTokenSource->IsNextContentRequested() : false;
+	return OptionsCancellationTokenSource ? OptionsCancellationTokenSource->IsCancellationRequested() : false;
 }
 
 void UYarnDialogueRunner::CreateSaliencyStrategy()

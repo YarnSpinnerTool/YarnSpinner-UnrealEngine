@@ -48,6 +48,10 @@
 // requested hurry-up or skip.
 #include "YarnCancellationToken.h"
 
+// EYarnLineCompletionRequest, FOnYarnLineFinished, FOnYarnOptionSelected -
+// shared types crossing the presenter <-> runner boundary.
+#include "YarnPresenterTypes.h"
+
 // EYarnSaliencyStrategy, IYarnSaliencyStrategy - for smart content selection.
 // Saliency helps pick the best content when multiple options are available.
 #include "YarnSaliency.h"
@@ -322,18 +326,21 @@ public:
 	void RequestHurryUpOption();
 
 	/**
-	 * Get the current cancellation token for line presentation.
-	 * Presenters use this to check hurry-up and skip requests.
+	 * Get a cancellation token observing the current line's cancellation
+	 * source. Presenters use this to check hurry-up and skip requests.
+	 *
+	 * Returned by value: the token itself is a lightweight handle. The
+	 * actual state lives in the runner's UYarnCancellationTokenSource.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
-	FYarnLineCancellationToken& GetCurrentCancellationToken();
+	FYarnLineCancellationToken GetCurrentCancellationToken();
 
 	/**
-	 * Get the current cancellation token for options presentation.
-	 * Option presenters use this to check hurry-up and skip requests.
+	 * Get a cancellation token observing the current options presentation's
+	 * cancellation source. Option presenters use this for hurry-up checks.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
-	FYarnLineCancellationToken& GetCurrentOptionsCancellationToken();
+	FYarnLineCancellationToken GetCurrentOptionsCancellationToken();
 
 	/** Const version of hurry-up check for presenters */
 	bool IsHurryUpRequested() const;
@@ -427,9 +434,32 @@ public:
 
 	/**
 	 * Called by a presenter when it finishes presenting a line.
-	 * Decrements ActiveLinePresenterCount and calls Continue() when all presenters are done.
+	 *
+	 * Legacy back-compat path. New flow is the FOnYarnLineFinished callback
+	 * bound in HandleLine; this stays so presenters that bypass the new
+	 * flow (e.g. legacy code that calls back via the runner pointer) still
+	 * work.
 	 */
 	void NotifyPresenterLineComplete();
+
+	/**
+	 * Fired by a presenter via its FOnYarnLineFinished delegate when it
+	 * finishes presenting a line. Receives the presenter's request about
+	 * the line as a whole (see EYarnLineCompletionRequest).
+	 *
+	 * Decrements the outstanding count, honours an EndLine request by
+	 * cancelling the current content source, and calls Continue once all
+	 * presenters have signalled.
+	 */
+	UFUNCTION()
+	void HandlePresenterLineFinished(EYarnLineCompletionRequest Request);
+
+	/**
+	 * Fired by a presenter via its FOnYarnOptionSelected delegate when the
+	 * player picks an option. Forwards to SelectOption.
+	 */
+	UFUNCTION()
+	void HandlePresenterOptionSelected(int32 OptionIndex);
 
 protected:
 	// ========================================================================
@@ -448,15 +478,10 @@ protected:
 	/** Parameter counts for registered functions */
 	TMap<FString, int32> FunctionParameterCounts;
 
-	/** Whether hurry-up has been requested */
-	bool bHurryUpRequested = false;
-
-	/** Whether next-line has been requested */
-	bool bNextLineRequested = false;
-
 	/**
-	 * Count of presenters that are still presenting the current line.
-	 * Decremented by NotifyPresenterLineComplete; Continue() is called when it reaches 0.
+	 * Count of presenters still presenting the current line. Decremented as
+	 * each presenter calls back via its FOnYarnLineFinished delegate; the
+	 * runner calls Continue() once the count reaches zero.
 	 */
 	int32 ActiveLinePresenterCount = 0;
 
@@ -520,11 +545,30 @@ protected:
 	/** Called when wait timer completes */
 	void OnWaitComplete();
 
-	/** Cancellation token source for line presentation */
+	// ------------------------------------------------------------------------
+	// Two-level cancellation: dialogue → content
+	// ------------------------------------------------------------------------
+	// One source for the conversation as a whole, and a fresh linked source
+	// for each line / options block. Cancelling the dialogue source cascades
+	// down to whatever per-content source is current. Cancelling a per-content
+	// source ("skip this line") does not bubble up to the dialogue.
+	//
+	// Wrappers (interruption presenters and the like) build their own linked
+	// sources from tokens off CancellationTokenSource, so the chain extends
+	// any number of levels without any layer having to know about the others.
+
+	/** Lives for the duration of a single conversation. Cancel to tear the
+	 *  whole thing down (StopDialogue). */
+	UPROPERTY()
+	UYarnCancellationTokenSource* DialogueCancellationSource;
+
+	/** Per-line source, linked to DialogueCancellationSource. Replaced with
+	 *  a fresh one at the start of each line. */
 	UPROPERTY()
 	UYarnCancellationTokenSource* CancellationTokenSource;
 
-	/** Cancellation token source for options presentation */
+	/** Per-options source, linked to DialogueCancellationSource. Replaced
+	 *  with a fresh one at the start of each options block. */
 	UPROPERTY()
 	UYarnCancellationTokenSource* OptionsCancellationTokenSource;
 

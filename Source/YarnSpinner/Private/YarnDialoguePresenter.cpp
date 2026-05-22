@@ -96,17 +96,33 @@ void UYarnDialoguePresenter::SetDialogueRunner(UYarnDialogueRunner* Runner)
 	DialogueRunner = Runner;
 }
 
-void UYarnDialoguePresenter::Internal_RunLine(const FYarnLocalizedLine& Line, bool bCanHurry)
+void UYarnDialoguePresenter::Internal_RunLine(const FYarnLocalizedLine& Line,
+                                              bool bCanHurry,
+                                              const FYarnLineCancellationToken& Token,
+                                              const FOnYarnLineFinished& OnFinished)
 {
 	bIsPresentingLine = true;
 	CurrentLine = Line;
+
+	// Stash the token and callback for the duration of this line. The
+	// BlueprintNativeEvent RunLine doesn't carry them in its parameter
+	// list (so existing Blueprint subclasses keep compiling), so the
+	// convenience helpers read them from here when the presenter says
+	// it's done.
+	CurrentLineCancellationToken = Token;
+	CurrentLineFinishedCallback = OnFinished;
+
 	RunLine(Line, bCanHurry);
 }
 
-void UYarnDialoguePresenter::Internal_RunOptions(const FYarnOptionSet& Options)
+void UYarnDialoguePresenter::Internal_RunOptions(const FYarnOptionSet& Options,
+                                                 const FYarnLineCancellationToken& Token,
+                                                 const FOnYarnOptionSelected& OnSelected)
 {
 	bIsPresentingOptions = true;
 	CurrentOptions = Options;
+	CurrentOptionsCancellationToken = Token;
+	CurrentOptionSelectedCallback = OnSelected;
 	RunOptions(Options);
 }
 
@@ -114,11 +130,49 @@ void UYarnDialoguePresenter::OnLinePresentationComplete()
 {
 	bIsPresentingLine = false;
 
-	// The runner waits for ALL presenters to complete before continuing.
-	// NotifyPresenterLineComplete tracks the count and only calls
-	// Continue() when all presenters have finished.
+	// New flow: fire the callback that whoever called us handed in.
+	// Take a local copy and clear the stored callback first, so a
+	// re-entrant call (or a callback that calls back into us) won't
+	// fire it a second time.
+	if (CurrentLineFinishedCallback.IsBound())
+	{
+		FOnYarnLineFinished Cb = CurrentLineFinishedCallback;
+		CurrentLineFinishedCallback.Unbind();
+		CurrentLineCancellationToken = FYarnLineCancellationToken();
+		Cb.ExecuteIfBound(EYarnLineCompletionRequest::None);
+		return;
+	}
+
+	// Legacy fallback: presenter was started by some path that didn't
+	// hand in a callback (typically code that bypassed Internal_RunLine).
+	// Talk to the runner directly through the back-pointer.
 	if (DialogueRunner)
 	{
+		DialogueRunner->NotifyPresenterLineComplete();
+	}
+}
+
+void UYarnDialoguePresenter::OnLinePresentationCompleteAndEndLine()
+{
+	bIsPresentingLine = false;
+
+	if (CurrentLineFinishedCallback.IsBound())
+	{
+		FOnYarnLineFinished Cb = CurrentLineFinishedCallback;
+		CurrentLineFinishedCallback.Unbind();
+		CurrentLineCancellationToken = FYarnLineCancellationToken();
+		Cb.ExecuteIfBound(EYarnLineCompletionRequest::EndLine);
+		return;
+	}
+
+	// Legacy fallback. The old API has no way to express "end this line";
+	// the closest thing is asking the runner to advance, then signalling
+	// our own completion. Not behaviourally identical to the new path
+	// (siblings see this as a player skip rather than a line driver) but
+	// it's the best we can do without a callback.
+	if (DialogueRunner)
+	{
+		DialogueRunner->RequestNextLine();
 		DialogueRunner->NotifyPresenterLineComplete();
 	}
 }
@@ -126,6 +180,15 @@ void UYarnDialoguePresenter::OnLinePresentationComplete()
 void UYarnDialoguePresenter::OnOptionSelected(int32 OptionIndex)
 {
 	bIsPresentingOptions = false;
+
+	if (CurrentOptionSelectedCallback.IsBound())
+	{
+		FOnYarnOptionSelected Cb = CurrentOptionSelectedCallback;
+		CurrentOptionSelectedCallback.Unbind();
+		CurrentOptionsCancellationToken = FYarnLineCancellationToken();
+		Cb.ExecuteIfBound(OptionIndex);
+		return;
+	}
 
 	if (DialogueRunner)
 	{
@@ -143,6 +206,17 @@ void UYarnDialoguePresenter::RequestContinue()
 
 bool UYarnDialoguePresenter::IsHurryUpRequested() const
 {
+	// Prefer the stored token. It points to whichever cancellation source
+	// is actually governing this presenter's current line - the runner's
+	// content source in the common case, or a wrapper's linked source
+	// when this presenter is being driven by a wrapper. The token is the
+	// authoritative answer because the wrapper might have cancelled its
+	// own source without the runner knowing.
+	if (CurrentLineCancellationToken.CanBeCancelled())
+	{
+		return CurrentLineCancellationToken.IsHurryUpRequested();
+	}
+	// Legacy fallback for code paths that didn't go through Internal_RunLine.
 	if (DialogueRunner)
 	{
 		return DialogueRunner->IsHurryUpRequested();
@@ -152,6 +226,10 @@ bool UYarnDialoguePresenter::IsHurryUpRequested() const
 
 bool UYarnDialoguePresenter::IsNextContentRequested() const
 {
+	if (CurrentLineCancellationToken.CanBeCancelled())
+	{
+		return CurrentLineCancellationToken.IsCancellationRequested();
+	}
 	if (DialogueRunner)
 	{
 		return DialogueRunner->IsNextContentRequested();
@@ -161,6 +239,10 @@ bool UYarnDialoguePresenter::IsNextContentRequested() const
 
 bool UYarnDialoguePresenter::IsOptionHurryUpRequested() const
 {
+	if (CurrentOptionsCancellationToken.CanBeCancelled())
+	{
+		return CurrentOptionsCancellationToken.IsHurryUpRequested();
+	}
 	if (DialogueRunner)
 	{
 		return DialogueRunner->IsOptionHurryUpRequested();
@@ -170,6 +252,10 @@ bool UYarnDialoguePresenter::IsOptionHurryUpRequested() const
 
 bool UYarnDialoguePresenter::IsOptionNextContentRequested() const
 {
+	if (CurrentOptionsCancellationToken.CanBeCancelled())
+	{
+		return CurrentOptionsCancellationToken.IsCancellationRequested();
+	}
 	if (DialogueRunner)
 	{
 		return DialogueRunner->IsOptionNextContentRequested();
@@ -279,9 +365,13 @@ void UYarnDialoguePresenter::CancelAutoAdvanceTimer()
 
 void UYarnDialoguePresenter::OnAutoAdvanceTimerFired()
 {
-	// Only advance if we're still presenting a line
-	if (bIsPresentingLine && DialogueRunner)
+	// Auto-advance is the presenter saying "I've shown this for long
+	// enough; the line should move on." That's exactly the EndLine
+	// semantic. Going through the new completion path means a wrapping
+	// presenter sees this as its child finishing-with-end-line-request,
+	// rather than bypassing the wrapper via the runner back-pointer.
+	if (bIsPresentingLine)
 	{
-		DialogueRunner->RequestNextLine();
+		OnLinePresentationCompleteAndEndLine();
 	}
 }
