@@ -67,23 +67,23 @@ public:
     // ========================================================================
 
     /** The text block for the speaker's name */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UTextBlock* SpeakerNameText;
 
     /** The text block for the dialogue content */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UTextBlock* DialogueText;
 
     /** Container for option buttons */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UVerticalBox* OptionsContainer;
 
     /** The continue indicator (shown when waiting for player input) */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UWidget* ContinueIndicator;
 
     /** Border/background for the dialogue box */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UBorder* DialogueBoxBorder;
 
     // ========================================================================
@@ -187,31 +187,31 @@ public:
     // ========================================================================
 
     /** Portrait image */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UImage* PortraitImage;
 
     /** Speaker name text */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UTextBlock* SpeakerNameText;
 
     /** Name plate background */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UBorder* NamePlateBorder;
 
     /** Dialogue text */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UTextBlock* DialogueText;
 
     /** Options container */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UVerticalBox* OptionsContainer;
 
     /** Continue indicator */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UWidget* ContinueIndicator;
 
     /** Main dialogue box border */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UBorder* DialogueBoxBorder;
 
     // ========================================================================
@@ -339,11 +339,11 @@ public:
     // ========================================================================
 
     /** The subtitle text */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UTextBlock* SubtitleText;
 
     /** Background border */
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Widgets", meta = (BindWidgetOptional))
     UBorder* BackgroundBorder;
 
     // ========================================================================

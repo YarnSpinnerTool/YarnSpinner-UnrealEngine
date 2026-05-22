@@ -18,12 +18,8 @@
 #include "YarnCancellationToken.h"
 
 #include "Misc/ScopeLock.h"
-#include "UObject/UObjectGlobals.h"
-
-// Suppress deprecation warnings inside this translation unit. We implement
-// deprecated forwarders here on purpose; we don't want to wear our own
-// deprecation noise when doing so.
-PRAGMA_DISABLE_DEPRECATION_WARNINGS
+#include "UObject/UObjectGlobals.h" // GetTransientPackage()
+#include "UObject/Package.h"        // full UPackage type (so UPackage* -> UObject* converts)
 
 // ============================================================================
 // FYarnLineCancellationToken
@@ -54,10 +50,15 @@ bool FYarnLineCancellationToken::IsAnyCancellationRequested() const
 	return IsCancellationRequested() || IsHurryUpRequested();
 }
 
+// These three are deprecated forwarders (tokens are observers only now).
+// Defining a deprecated member triggers the deprecation warning at the
+// definition itself, so scope the suppression to just this block.
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+
 void FYarnLineCancellationToken::MarkNextContentRequested()
 {
-	// Deprecated: tokens are observers only. The forwarder is here so the
-	// handful of legacy call sites don't suddenly silently become no-ops.
+	// Forwarder so the handful of legacy call sites don't silently become
+	// no-ops while they migrate to calling Cancel() on the source.
 	if (UYarnCancellationTokenSource* Src = Source.Get())
 	{
 		Src->Cancel();
@@ -79,6 +80,8 @@ void FYarnLineCancellationToken::Reset()
 		Src->Reset();
 	}
 }
+
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 // ============================================================================
 // UYarnCancellationTokenSource
@@ -373,5 +376,3 @@ UYarnCancellationTokenSource* UYarnCancellationTokenSource::CreateLinkedTokenSou
 
 	return Linked;
 }
-
-PRAGMA_ENABLE_DEPRECATION_WARNINGS
