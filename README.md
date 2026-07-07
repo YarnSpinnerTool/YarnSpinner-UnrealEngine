@@ -42,7 +42,7 @@ This project uses the Yarn Spinner Public License. You're free to use it in your
 
 1. Copy the `YarnSpinner/` folder from this repository into your Unreal project's `Plugins/` directory (so that `YarnSpinner.uplugin` is at `Plugins/YarnSpinner/YarnSpinner.uplugin`).
 2. Open your project in the Unreal Editor -- the plugin will be detected automatically.
-3. Install `ysc` (the [Yarn Spinner Console](https://github.com/YarnSpinnerTool/YarnSpinner-Console) tool) from : `dotnet tool install YarnSpinner.Console --global --version 3.1.0-alpha1`
+3. Install `ysc` (the [Yarn Spinner Console](https://github.com/YarnSpinnerTool/YarnSpinner-Console) tool) from : `dotnet tool install YarnSpinner.Console --global --version 3.2.2`
 4. Write your dialogue in `.yarn` files. Create a `.yarnproject` file that defines which `.yarn` files to include via `sourceFiles` globs.
 5. Drag your `.yarnproject` into the Content Browser. The plugin automatically runs `ysc compile`, parses the compiled program, string table, and metadata, and creates a `UYarnProject` asset.
 6. Add a `UYarnDialogueRunner` component to an actor, assign your imported Yarn Project asset, and call `StartDialogue()`.
