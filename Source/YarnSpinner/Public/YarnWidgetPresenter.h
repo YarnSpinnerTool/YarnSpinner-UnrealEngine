@@ -151,4 +151,8 @@ protected:
 	/** Callback when the widget signals an option was chosen. */
 	UFUNCTION()
 	void HandleOptionChosen(int32 OptionIndex);
+
+	/** Callback when the widget's line is fully displayed — arms auto-advance. */
+	UFUNCTION()
+	void HandleTypewriterFinished();
 };

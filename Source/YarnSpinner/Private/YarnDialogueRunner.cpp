@@ -98,6 +98,16 @@ void UYarnDialogueRunner::BeginPlay()
 	// Create saliency strategy
 	CreateSaliencyStrategy();
 
+	// Resolve editor-assigned component references into the runtime array
+	for (const FComponentReference& PresenterRef : DialoguePresenterReferences)
+	{
+		UYarnDialoguePresenter* Referenced = Cast<UYarnDialoguePresenter>(PresenterRef.GetComponent(GetOwner()));
+		if (Referenced && !DialoguePresenters.Contains(Referenced))
+		{
+			DialoguePresenters.Add(Referenced);
+		}
+	}
+
 	// Set up presenters
 	for (UYarnDialoguePresenter* Presenter : DialoguePresenters)
 	{
@@ -207,12 +217,17 @@ void UYarnDialogueRunner::StartDialogue(const FString& NodeName)
 		return;
 	}
 
-	// Debug: log available nodes
 	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Starting dialogue at node '%s'"), *NodeName);
-	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: YarnProject has %d nodes"), YarnProject->Program.Nodes.Num());
-	for (const auto& Pair : YarnProject->Program.Nodes)
+
+	// Debug: enumerating every node is O(project) and can hitch a frame
+	// on StartDialogue in large projects — verbose only.
+	if (bVerboseLogging)
 	{
-		UE_LOG(LogYarnSpinner, Log, TEXT("  - Node '%s' has %d instructions"), *Pair.Key, Pair.Value.Instructions.Num());
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: YarnProject has %d nodes"), YarnProject->Program.Nodes.Num());
+		for (const auto& Pair : YarnProject->Program.Nodes)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("  - Node '%s' has %d instructions"), *Pair.Key, Pair.Value.Instructions.Num());
+		}
 	}
 
 	if (!YarnProject->HasNode(NodeName))
@@ -276,6 +291,9 @@ void UYarnDialogueRunner::StopDialogue()
 	{
 		World->GetTimerManager().ClearTimer(WaitTimerHandle);
 	}
+
+	// A pending blocking command dies with the dialogue
+	bBlockingCommandPending = false;
 
 	// Cancel the dialogue source. Linked per-line and per-options sources
 	// see this and cascade automatically, so we don't need to cancel them
@@ -600,7 +618,21 @@ void UYarnDialogueRunner::HandleCommand(const FYarnCommand& Command)
 	// Check for registered handler
 	if (TFunction<void(const TArray<FString>&)>* Handler = CommandHandlers.Find(Command.CommandName))
 	{
+		const bool bIsBlocking = BlockingCommandNames.Contains(Command.CommandName);
+		if (bIsBlocking)
+		{
+			// Blocking command: dialogue stays parked (the VM is already in
+			// WaitingForContinue) until CompleteBlockingCommand() is called.
+			bBlockingCommandPending = true;
+		}
+
 		(*Handler)(Command.Parameters);
+
+		if (bIsBlocking)
+		{
+			return;
+		}
+
 		// Defer Continue() to next tick to avoid recursion when called from within RunInstruction
 		if (UWorld* World = GetWorld())
 		{
@@ -841,6 +873,38 @@ void UYarnDialogueRunner::AddCommandHandler(const FString& CommandName, TFunctio
 void UYarnDialogueRunner::RemoveCommandHandler(const FString& CommandName)
 {
 	CommandHandlers.Remove(CommandName);
+	BlockingCommandNames.Remove(CommandName);
+}
+
+void UYarnDialogueRunner::AddBlockingCommandHandler(const FString& CommandName, TFunction<void(const TArray<FString>&)> Handler)
+{
+	CommandHandlers.Add(CommandName, Handler);
+	BlockingCommandNames.Add(CommandName);
+}
+
+void UYarnDialogueRunner::CompleteBlockingCommand()
+{
+	if (!bBlockingCommandPending)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: CompleteBlockingCommand called but no blocking command is pending"));
+		return;
+	}
+
+	bBlockingCommandPending = false;
+
+	// Defer Continue() to next tick, matching the non-blocking command path,
+	// so completing synchronously from inside the handler is also safe.
+	if (UWorld* World = GetWorld())
+	{
+		TWeakObjectPtr<UYarnDialogueRunner> WeakThis(this);
+		World->GetTimerManager().SetTimerForNextTick([WeakThis]()
+		{
+			if (WeakThis.IsValid() && WeakThis->IsDialogueRunning())
+			{
+				WeakThis->VirtualMachine.Continue();
+			}
+		});
+	}
 }
 
 void UYarnDialogueRunner::AddFunction(const FString& FunctionName, TFunction<FYarnValue(const TArray<FYarnValue>&)> Function, int32 ParameterCount)

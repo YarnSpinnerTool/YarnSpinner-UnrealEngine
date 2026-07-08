@@ -160,6 +160,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Events")
 	FOnYarnTypewriterComplete OnTypewriterComplete;
 
+	/** Whether the typewriter is currently animating this presenter's line. */
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner|Typewriter")
+	bool IsTypewriting() const { return bIsTypewriting; }
+
 protected:
 	/** The full text to display */
 	FString FullText;

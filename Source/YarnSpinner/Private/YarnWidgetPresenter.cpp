@@ -94,6 +94,7 @@ void UYarnWidgetPresenter::CreateWidget()
 		// Bind events
 		DialogueWidget->OnContinue.AddDynamic(this, &UYarnWidgetPresenter::HandleWidgetContinue);
 		DialogueWidget->OnOptionChosen.AddDynamic(this, &UYarnWidgetPresenter::HandleOptionChosen);
+		DialogueWidget->OnTypewriterFinished.AddDynamic(this, &UYarnWidgetPresenter::HandleTypewriterFinished);
 
 		// Add to viewport but keep hidden until dialogue starts
 		DialogueWidget->AddToViewport(100);
@@ -173,4 +174,11 @@ void UYarnWidgetPresenter::HandleWidgetContinue()
 void UYarnWidgetPresenter::HandleOptionChosen(int32 OptionIndex)
 {
 	OnOptionSelected(OptionIndex);
+}
+
+void UYarnWidgetPresenter::HandleTypewriterFinished()
+{
+	// The line is fully displayed — arm the base-class auto-advance timer.
+	// No-op unless bAutoAdvanceEnabled is set.
+	StartAutoAdvanceTimer();
 }

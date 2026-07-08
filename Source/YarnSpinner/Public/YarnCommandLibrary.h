@@ -91,6 +91,21 @@ public:
 	static void RegisterCommandHandler(UYarnDialogueRunner* DialogueRunner, const FString& CommandName, FYarnCommandHandlerBP Handler);
 
 	/**
+	 * Register a blocking command handler using a Blueprint delegate.
+	 *
+	 * Unlike RegisterCommandHandler, dialogue does not continue when the
+	 * handler returns — it stays paused until CompleteBlockingCommand() is
+	 * called on the dialogue runner. Use this for commands that drive
+	 * animations, movement, or anything else that takes time to finish.
+	 *
+	 * @param DialogueRunner The dialogue runner to register with.
+	 * @param CommandName The name of the command to handle (without the <<>>).
+	 * @param Handler The delegate to call when the command is received.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Commands")
+	static void RegisterBlockingCommandHandler(UYarnDialogueRunner* DialogueRunner, const FString& CommandName, FYarnCommandHandlerBP Handler);
+
+	/**
 	 * Unregister a command handler.
 	 *
 	 * @param DialogueRunner The dialogue runner to unregister from.

@@ -27,6 +27,7 @@
 // UActorComponent - base class. Dialogue runner is a component you attach to
 // an actor.
 #include "Components/ActorComponent.h"
+#include "Engine/EngineTypes.h"
 
 // Core yarn types - FYarnValue, FYarnLine, FYarnLocalizedLine, FYarnOptionSet,
 // FYarnCommand. These are the basic data structures used throughout.
@@ -157,9 +158,21 @@ public:
 	 * The dialogue presenters that will display lines and options.
 	 * You can have multiple - e.g., one for text, one for voice-over.
 	 * All presenters receive all content and handle it in parallel.
+	 *
+	 * The Details panel can't assign component instances to a raw object
+	 * array — wire presenters via DialoguePresenterReferences in the editor,
+	 * or add them to this array at runtime from Blueprints/C++.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner", meta = (UseComponentPicker))
+	UPROPERTY(BlueprintReadWrite, Category = "Yarn Spinner")
 	TArray<UYarnDialoguePresenter*> DialoguePresenters;
+
+	/**
+	 * Editor-assigned presenter components, resolved into DialoguePresenters
+	 * at BeginPlay. Supports presenters on this actor or (via the picker)
+	 * any other actor in the level.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Yarn Spinner", meta = (UseComponentPicker, AllowAnyActor, AllowedClasses = "/Script/YarnSpinner.YarnDialoguePresenter", DisplayName = "Dialogue Presenters"))
+	TArray<FComponentReference> DialoguePresenterReferences;
 
 	/**
 	 * The line provider for localisation.
@@ -389,6 +402,24 @@ public:
 	void RemoveCommandHandler(const FString& CommandName);
 
 	/**
+	 * Add a blocking command handler (C++ only). Like AddCommandHandler,
+	 * but dialogue does not continue when the handler returns — it stays
+	 * paused until CompleteBlockingCommand() is called. This is the same
+	 * mechanism the built-in <<wait>> command uses.
+	 * @param CommandName The command name (without <<>>)
+	 * @param Handler The function to call with command parameters
+	 */
+	void AddBlockingCommandHandler(const FString& CommandName, TFunction<void(const TArray<FString>&)> Handler);
+
+	/**
+	 * Resume dialogue after a blocking command handler has finished its
+	 * work. Safe to call from Blueprints; does nothing unless a blocking
+	 * command is currently holding the dialogue.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Commands")
+	void CompleteBlockingCommand();
+
+	/**
 	 * Add a function callable from yarn scripts (C++ only).
 	 * Yarn can then call {functionName(args)} in expressions.
 	 * @param FunctionName The function name
@@ -471,6 +502,12 @@ protected:
 
 	/** Registered command handlers (command name -> handler function) */
 	TMap<FString, TFunction<void(const TArray<FString>&)>> CommandHandlers;
+
+	/** Command names registered via AddBlockingCommandHandler. */
+	TSet<FString> BlockingCommandNames;
+
+	/** True while a blocking command is holding the dialogue. */
+	bool bBlockingCommandPending = false;
 
 	/** Registered yarn functions (function name -> implementation) */
 	TMap<FString, TFunction<FYarnValue(const TArray<FYarnValue>&)>> Functions;

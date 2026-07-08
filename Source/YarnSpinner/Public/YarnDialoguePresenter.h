@@ -261,8 +261,10 @@ public:
 	void OnOptionSelected(int32 OptionIndex);
 
 	/**
-	 * request that the dialogue runner continue to the next content.
-	 * this is a lower-level method - usually you'll use OnLinePresentationComplete.
+	 * Request the next step of the two-press continue flow: the first press
+	 * hurries the current line (completes the typewriter), the second press
+	 * advances to the next line. Mirrors UYarnInputHandler's advance input.
+	 * Usually you'll use OnLinePresentationComplete instead.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Presenter")
 	void RequestContinue();
@@ -470,8 +472,16 @@ protected:
 	// Dialogue runner needs access to internal methods
 	friend class UYarnDialogueRunner;
 
-	/** set the dialogue runner (called by the runner when presenter is registered) */
+public:
+	/**
+	 * Set the dialogue runner this presenter reports to. Called by the
+	 * runner when the presenter is registered; exposed to Blueprints so
+	 * presenters added at runtime can be wired up manually.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Presenter")
 	void SetDialogueRunner(UYarnDialogueRunner* Runner);
+
+protected:
 
 	/**
 	 * Called by the runner or by a wrapping presenter to start a line.

@@ -200,7 +200,18 @@ void UYarnDialoguePresenter::RequestContinue()
 {
 	if (DialogueRunner)
 	{
-		DialogueRunner->Continue();
+		// Mirror UYarnInputHandler::ProcessAdvanceInput: first press hurries
+		// the current line, second press advances. Calling the VM's
+		// Continue() directly would bypass presenters and the cancellation
+		// token, doing nothing observable mid-line.
+		if (!DialogueRunner->GetCurrentCancellationToken().IsHurryUpRequested())
+		{
+			DialogueRunner->RequestHurryUp();
+		}
+		else
+		{
+			DialogueRunner->RequestNextLine();
+		}
 	}
 }
 

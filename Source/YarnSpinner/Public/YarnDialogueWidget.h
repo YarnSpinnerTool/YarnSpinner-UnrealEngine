@@ -113,6 +113,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Dialogue Widget")
 	FOnYarnDialogueContinue OnContinue;
 
+	/**
+	 * Called when the current line is fully displayed — the typewriter
+	 * finished (naturally or skipped), or the line was shown instantly.
+	 * The widget presenter uses this to arm auto-advance.
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Dialogue Widget")
+	FOnYarnDialogueContinue OnTypewriterFinished;
+
 	/** Called when the player selects an option. */
 	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Dialogue Widget")
 	FOnYarnOptionChosen OnOptionChosen;

@@ -43,6 +43,30 @@ void UYarnCommandLibrary::RegisterCommandHandler(UYarnDialogueRunner* DialogueRu
 	});
 }
 
+void UYarnCommandLibrary::RegisterBlockingCommandHandler(UYarnDialogueRunner* DialogueRunner, const FString& CommandName, FYarnCommandHandlerBP Handler)
+{
+	if (!DialogueRunner)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("RegisterBlockingCommandHandler: DialogueRunner is null"));
+		return;
+	}
+
+	if (CommandName.IsEmpty())
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("RegisterBlockingCommandHandler: CommandName is empty"));
+		return;
+	}
+
+	// wrap the blueprint delegate in a TFunction
+	DialogueRunner->AddBlockingCommandHandler(CommandName, [Handler](const TArray<FString>& Parameters)
+	{
+		if (Handler.IsBound())
+		{
+			Handler.Execute(Parameters);
+		}
+	});
+}
+
 void UYarnCommandLibrary::UnregisterCommandHandler(UYarnDialogueRunner* DialogueRunner, const FString& CommandName)
 {
 	if (!DialogueRunner)
