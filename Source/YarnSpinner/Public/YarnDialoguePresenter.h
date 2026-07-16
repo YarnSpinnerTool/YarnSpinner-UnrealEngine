@@ -569,8 +569,41 @@ public:
 	FYarnLocalizedLine GetLocalizedLine(const FYarnLine& Line);
 	virtual FYarnLocalizedLine GetLocalizedLine_Implementation(const FYarnLine& Line);
 
+	/**
+	 * register a marker processor that rewrites [name] markup at parse time.
+	 * the processor is called whenever an attribute with the given name
+	 * completes during markup parsing, and its output replaces the attribute's
+	 * text span (the attribute itself is consumed). this is the same mechanism
+	 * the built-in select/plural/ordinal markers use.
+	 *
+	 * @param AttributeName the markup attribute name to handle (e.g. "shake").
+	 * @param Processor the processor to run for that attribute.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Line Provider")
+	void RegisterMarkerProcessor(const FString& AttributeName, TScriptInterface<IYarnMarkupProcessor> Processor);
+
+	/**
+	 * remove a previously registered marker processor.
+	 * @param AttributeName the markup attribute name to stop handling.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Line Provider")
+	void DeregisterMarkerProcessor(const FString& AttributeName);
+
+	/**
+	 * called before upcoming lines run, so the provider can preload content
+	 * (localised audio, external assets). the base implementation does nothing.
+	 * @param LineIDs the ids of lines expected to run soon.
+	 */
+	UFUNCTION(BlueprintNativeEvent, Category = "Yarn Spinner|Line Provider")
+	void PrepareForLines(const TArray<FString>& LineIDs);
+	virtual void PrepareForLines_Implementation(const TArray<FString>& LineIDs);
+
 protected:
 	/** the yarn project used for text lookup */
 	UPROPERTY()
 	UYarnProject* YarnProject;
+
+	/** marker processors keyed by the attribute name they rewrite */
+	UPROPERTY()
+	TMap<FString, TScriptInterface<IYarnMarkupProcessor>> MarkerProcessors;
 };

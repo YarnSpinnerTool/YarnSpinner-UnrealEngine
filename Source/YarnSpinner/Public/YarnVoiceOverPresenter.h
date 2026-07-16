@@ -105,6 +105,9 @@ public:
 	virtual void OnDialogueComplete_Implementation() override;
 	virtual void RunLine_Implementation(const FYarnLocalizedLine& Line, bool bCanHurry) override;
 
+	/** Preloads audio assets for upcoming lines so playback starts without a hitch. */
+	virtual void OnPrepareForLines_Implementation(const TArray<FString>& LineIDs) override;
+
 	// ========================================================================
 	// configuration - all editable in editor and blueprints
 	// ========================================================================
@@ -204,6 +207,9 @@ protected:
 
 	/** The current line being presented (stored for logging/debugging). */
 	FYarnLocalizedLine CurrentLine;
+
+	/** Keeps voice-over assets preloaded by OnPrepareForLines in memory. */
+	TSharedPtr<struct FStreamableHandle> PreloadHandle;
 
 	/** Whether we're currently playing audio (not fading). */
 	bool bIsPlaying = false;

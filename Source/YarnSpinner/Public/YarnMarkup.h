@@ -474,6 +474,22 @@ public:
 	static FYarnMarkupParseResult ParseMarkupFull(const FString& Text, const FString& LocaleCode = TEXT("en"), bool bAddImplicitCharacterAttribute = true);
 
 	/**
+	 * Parse markup with registered marker processors applied at parse time.
+	 *
+	 * Processors are keyed by attribute name. When an attribute with a
+	 * registered processor completes, the processor rewrites the attribute's
+	 * text span and the attribute is consumed (not included in the result),
+	 * the same way the built-in select/plural/ordinal markers behave.
+	 *
+	 * @param Text The text containing markup tags.
+	 * @param LocaleCode The locale code for plural/ordinal rules.
+	 * @param bAddImplicitCharacterAttribute Detect "Name: text" as a character attribute.
+	 * @param MarkerProcessors Processors keyed by the attribute name they handle.
+	 * @return Parse result with plain text, attributes, and character name.
+	 */
+	static FYarnMarkupParseResult ParseMarkupFull(const FString& Text, const FString& LocaleCode, bool bAddImplicitCharacterAttribute, const TMap<FString, TScriptInterface<IYarnMarkupProcessor>>& MarkerProcessors);
+
+	/**
 	 * Apply markup processors to text.
 	 *
 	 * @param ParseResult The parsed markup to process.

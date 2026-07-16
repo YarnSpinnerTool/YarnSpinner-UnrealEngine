@@ -314,6 +314,14 @@ struct YARNSPINNER_API FYarnLocalizedLine
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
 	FYarnMarkupParseResult TextMarkup;
 
+	/**
+	 * If this line shadows another line, the ID of the source line whose
+	 * text (and assets, such as voice over) this line uses. Empty when the
+	 * line doesn't shadow anything.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
+	FString ShadowSourceLineID;
+
 	FYarnLocalizedLine() = default;
 
 	/** Check if this is a valid line (has a line ID) */

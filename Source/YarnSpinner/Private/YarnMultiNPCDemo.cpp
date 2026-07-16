@@ -38,6 +38,7 @@
 // static mesh for room geometry
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
 #include "Engine/StaticMeshActor.h"
 
 // lighting

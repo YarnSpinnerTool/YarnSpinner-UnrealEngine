@@ -17,6 +17,7 @@
 
 #include "YarnDialoguePresenter.h"
 #include "YarnDialogueRunner.h"
+#include "YarnSpinnerModule.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
 
@@ -293,11 +294,15 @@ FYarnLocalizedLine UYarnLineProvider::GetLocalizedLine_Implementation(const FYar
 		BaseText = FYarnVirtualMachine::ExpandSubstitutions(BaseText, Line.Substitutions);
 
 		// Parse markup: handles [tags], escape sequences, character names,
-		// select/plural/ordinal, whitespace trimming, etc.
+		// select/plural/ordinal, whitespace trimming, etc. The base provider
+		// serves unlocalised text, so plural/ordinal rules use the project's
+		// base language.
+		FString Locale = YarnProject->BaseLanguage.IsEmpty() ? TEXT("en") : YarnProject->BaseLanguage;
 		FYarnMarkupParseResult ParseResult = UYarnMarkupLibrary::ParseMarkupFull(
 			BaseText,
-			TEXT("en"),
-			true // add implicit character attribute
+			Locale,
+			true, // add implicit character attribute
+			MarkerProcessors
 		);
 
 		LocalizedLine.TextMarkup = ParseResult;
@@ -312,6 +317,31 @@ FYarnLocalizedLine UYarnLineProvider::GetLocalizedLine_Implementation(const FYar
 	}
 
 	return LocalizedLine;
+}
+
+void UYarnLineProvider::RegisterMarkerProcessor(const FString& AttributeName, TScriptInterface<IYarnMarkupProcessor> Processor)
+{
+	if (AttributeName.IsEmpty() || !Processor.GetObject())
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("RegisterMarkerProcessor: attribute name and processor must both be set"));
+		return;
+	}
+	if (MarkerProcessors.Contains(AttributeName))
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("RegisterMarkerProcessor: replacing existing processor for [%s]"), *AttributeName);
+	}
+	MarkerProcessors.Add(AttributeName, Processor);
+}
+
+void UYarnLineProvider::DeregisterMarkerProcessor(const FString& AttributeName)
+{
+	MarkerProcessors.Remove(AttributeName);
+}
+
+void UYarnLineProvider::PrepareForLines_Implementation(const TArray<FString>& LineIDs)
+{
+	// Base provider has nothing to preload. Subclasses that load external
+	// content (audio, images) should override this to prefetch.
 }
 
 // Auto-advance implementation

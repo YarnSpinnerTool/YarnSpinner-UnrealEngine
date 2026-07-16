@@ -369,6 +369,37 @@ struct YARNSPINNER_API FYarnLocalization
 //   - can access BaseStringTable and Localizations for text lookup
 
 /**
+ * A diagnostic message produced by the Yarn compiler during import.
+ * Warning-severity diagnostics are retained on the project asset so they
+ * remain visible after import, matching the Unity importer.
+ */
+USTRUCT(BlueprintType)
+struct YARNSPINNER_API FYarnProjectDiagnostic
+{
+	GENERATED_BODY()
+
+	/** "Warning" or "Error" */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
+	FString Severity;
+
+	/** The source file the diagnostic refers to, if known */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
+	FString FilePath;
+
+	/** 1-based line number in the source file, 0 if unknown */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
+	int32 Line = 0;
+
+	/** 1-based column number in the source file, 0 if unknown */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
+	int32 Column = 0;
+
+	/** The diagnostic message text */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner")
+	FString Message;
+};
+
+/**
  * A Yarn project asset.
  *
  * Contains a compiled program and associated localisation data.
@@ -426,6 +457,14 @@ public:
 	/** Metadata for lines (line ID -> metadata string) */
 	UPROPERTY()
 	TMap<FString, FString> LineMetadata;
+
+	/**
+	 * Diagnostics reported by the Yarn compiler on the most recent import.
+	 * Warnings don't fail the import, but they're kept here so they stay
+	 * visible in the editor after the import completes.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner|Diagnostics")
+	TArray<FYarnProjectDiagnostic> ImportDiagnostics;
 
 	// ========================================================================
 	// Node information

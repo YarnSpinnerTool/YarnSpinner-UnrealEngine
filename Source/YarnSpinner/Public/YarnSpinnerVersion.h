@@ -28,8 +28,10 @@
 // Include this header in any file that needs version-specific behaviour.
 // Use the YARNSPINNER_* macros to conditionally compile code.
 
-// ENGINE_MAJOR_VERSION and ENGINE_MINOR_VERSION are defined by Unreal's build system
-// They're available via CoreMinimal.h or can be accessed directly
+// ENGINE_MAJOR_VERSION and ENGINE_MINOR_VERSION come from the engine's
+// Version.h, pulled in via EngineVersionComparison.h. Without this include
+// the macros are undefined, which newer engine versions treat as an error.
+#include "Misc/EngineVersionComparison.h"
 
 // ============================================================================
 // Engine Version Macros

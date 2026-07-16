@@ -1509,6 +1509,12 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkup(const FString& Text)
 
 FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, const FString& LocaleCode, bool bAddImplicitCharacterAttribute)
 {
+	static const TMap<FString, TScriptInterface<IYarnMarkupProcessor>> NoProcessors;
+	return ParseMarkupFull(Text, LocaleCode, bAddImplicitCharacterAttribute, NoProcessors);
+}
+
+FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, const FString& LocaleCode, bool bAddImplicitCharacterAttribute, const TMap<FString, TScriptInterface<IYarnMarkupProcessor>>& MarkerProcessors)
+{
 	FYarnMarkupParseResult Result;
 
 	if (Text.IsEmpty())
@@ -1564,6 +1570,77 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 	FString PlainText;
 	TArray<FMarkupOpenTag> OpenTags;
 	int32 NextTrackingID = 0;
+
+	// Applies a registered marker processor to a just-completed attribute.
+	// At close time the attribute's span is always the suffix of PlainText,
+	// so the rewrite is a splice at Attr.Position with no position fix-ups
+	// needed for attributes outside the span. Child attributes inside the
+	// span are handed to the processor span-relative (like the C# parser's
+	// childAttributes) and rebased afterwards. Returns true if the attribute
+	// was consumed by a processor and must not be added to the result.
+	auto TryRunMarkerProcessor = [&](const FYarnMarkupAttribute& Attr, bool bIsSplit) -> bool
+	{
+		if (MarkerProcessors.Num() == 0)
+		{
+			return false;
+		}
+
+		const TScriptInterface<IYarnMarkupProcessor>* Found = MarkerProcessors.Find(Attr.Name);
+		if (!Found || !Found->GetObject())
+		{
+			return false;
+		}
+
+		if (bIsSplit)
+		{
+			// A split (adoption-agency) attribute covers a discontiguous span;
+			// rewriting part of it is ill-defined, so leave it as markup.
+			UE_LOG(LogYarnSpinner, Warning, TEXT("Markup: marker processor for [%s] skipped - attribute is split across misnested tags"), *Attr.Name);
+			return false;
+		}
+
+		FString ChildText = PlainText.Mid(Attr.Position, Attr.Length);
+
+		// Collect attributes fully inside the span, rebased to span-relative
+		// positions for the processor.
+		TArray<FYarnMarkupAttribute> ChildAttrs;
+		TArray<int32> ChildIndices;
+		for (int32 k = 0; k < Result.Attributes.Num(); k++)
+		{
+			const FYarnMarkupAttribute& Existing = Result.Attributes[k];
+			if (Existing.Position >= Attr.Position && Existing.Position + Existing.Length <= Attr.Position + Attr.Length)
+			{
+				FYarnMarkupAttribute Relative = Existing;
+				Relative.Position -= Attr.Position;
+				ChildAttrs.Add(Relative);
+				ChildIndices.Add(k);
+			}
+		}
+
+		FYarnMarkupReplacementResult ProcResult = IYarnMarkupProcessor::Execute_ProcessMarkup(
+			Found->GetObject(), Attr, ChildText, ChildAttrs, LocaleCode);
+
+		for (const FString& Diagnostic : ProcResult.Diagnostics)
+		{
+			UE_LOG(LogYarnSpinner, Warning, TEXT("Markup: [%s] processor: %s"), *Attr.Name, *Diagnostic);
+		}
+
+		// Splice the rewritten text over the span (the current PlainText suffix).
+		PlainText = PlainText.Left(Attr.Position) + ChildText;
+
+		// Replace the original child attributes with the processor's versions.
+		for (int32 k = ChildIndices.Num() - 1; k >= 0; k--)
+		{
+			Result.Attributes.RemoveAt(ChildIndices[k]);
+		}
+		for (FYarnMarkupAttribute& Relative : ChildAttrs)
+		{
+			Relative.Position += Attr.Position;
+			Result.Attributes.Add(Relative);
+		}
+
+		return true;
+	};
 
 	// Track whether the previous sibling had trimwhitespace=true
 	bool bTrimNextWhitespace = false;
@@ -1623,20 +1700,26 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 			// ---- Close-all [/] ----
 			if (TagContent == TEXT("/"))
 			{
-				// Close all open tags by creating attributes for each
+				// Close all open tags by creating attributes for each.
+				// Innermost first, so a marker processor's rewrite of an inner
+				// span is reflected in the outer attributes' lengths.
 				for (int32 j = OpenTags.Num() - 1; j >= 0; j--)
 				{
+					const bool bSplit = OpenTags[j].TrackingID >= 0;
 					FYarnMarkupAttribute Attr;
 					Attr.Name = OpenTags[j].Name;
 					Attr.Position = OpenTags[j].Position;
 					Attr.SourcePosition = OpenTags[j].SourcePosition;
 					Attr.Length = PlainText.Len() - OpenTags[j].Position;
 					Attr.Properties = OpenTags[j].Properties;
-					if (OpenTags[j].TrackingID >= 0)
+					if (bSplit)
 					{
 						Attr.Properties.Add(TEXT("_splitID"), FYarnMarkupValue::MakeString(FString::FromInt(OpenTags[j].TrackingID)));
 					}
-					Result.Attributes.Add(Attr);
+					if (!TryRunMarkerProcessor(Attr, bSplit))
+					{
+						Result.Attributes.Add(Attr);
+					}
 				}
 				OpenTags.Empty();
 				i = TagEnd + 1;
@@ -1690,17 +1773,21 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 					}
 
 					// Close the matched tag
+					const bool bSplit = OpenTags[MatchIndex].TrackingID >= 0;
 					FYarnMarkupAttribute Attr;
 					Attr.Name = OpenTags[MatchIndex].Name;
 					Attr.Position = OpenTags[MatchIndex].Position;
 					Attr.SourcePosition = OpenTags[MatchIndex].SourcePosition;
 					Attr.Length = PlainText.Len() - OpenTags[MatchIndex].Position;
 					Attr.Properties = OpenTags[MatchIndex].Properties;
-					if (OpenTags[MatchIndex].TrackingID >= 0)
+					if (bSplit)
 					{
 						Attr.Properties.Add(TEXT("_splitID"), FYarnMarkupValue::MakeString(FString::FromInt(OpenTags[MatchIndex].TrackingID)));
 					}
-					Result.Attributes.Add(Attr);
+					if (!TryRunMarkerProcessor(Attr, bSplit))
+					{
+						Result.Attributes.Add(Attr);
+					}
 
 					// Remove the matched tag and everything above it
 					OpenTags.RemoveAt(MatchIndex, OpenTags.Num() - MatchIndex);
@@ -1841,6 +1928,15 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 				Attr.SourcePosition = TagSourcePosition;
 				Attr.Length = 0;
 				Attr.Properties = Properties;
+
+				if (TryRunMarkerProcessor(Attr, false))
+				{
+					// Consumed as a replacement marker, like built-in select/plural/ordinal
+					bTrimNextWhitespace = false;
+					i = TagEnd + 1;
+					continue;
+				}
+
 				Result.Attributes.Add(Attr);
 
 				// Self-closing tags implicitly have trimwhitespace=true
@@ -1894,20 +1990,26 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 		}
 	}
 
-	// Close any remaining open tags at end of text
+	// Close any remaining open tags at end of text (innermost first, so
+	// marker-processor rewrites of inner spans land before outer lengths
+	// are computed)
 	for (int32 j = OpenTags.Num() - 1; j >= 0; j--)
 	{
+		const bool bSplit = OpenTags[j].TrackingID >= 0;
 		FYarnMarkupAttribute Attr;
 		Attr.Name = OpenTags[j].Name;
 		Attr.Position = OpenTags[j].Position;
 		Attr.SourcePosition = OpenTags[j].SourcePosition;
 		Attr.Length = PlainText.Len() - OpenTags[j].Position;
 		Attr.Properties = OpenTags[j].Properties;
-		if (OpenTags[j].TrackingID >= 0)
+		if (bSplit)
 		{
 			Attr.Properties.Add(TEXT("_splitID"), FYarnMarkupValue::MakeString(FString::FromInt(OpenTags[j].TrackingID)));
 		}
-		Result.Attributes.Add(Attr);
+		if (!TryRunMarkerProcessor(Attr, bSplit))
+		{
+			Result.Attributes.Add(Attr);
+		}
 	}
 
 	// ========================================================================

@@ -58,11 +58,19 @@ private:
 	 * @param OutCompiledPath Output path to the .yarnc file.
 	 * @param OutLinesPath Output path to the lines CSV.
 	 * @param OutMetadataPath Output path to the metadata CSV.
+	 * @param OutDiagnostics Compiler warnings/errors parsed from ysc output.
 	 * @param OutError Error message if compilation failed.
 	 * @return True if compilation succeeded.
 	 */
 	bool CompileYarnProject(const FString& ProjectPath, FString& OutCompiledPath, FString& OutLinesPath,
-		FString& OutMetadataPath, FString& OutError);
+		FString& OutMetadataPath, TArray<struct FYarnProjectDiagnostic>& OutDiagnostics, FString& OutError);
+
+	/**
+	 * Parse compiler diagnostics from ysc console output.
+	 * @param CompilerOutput The combined stdout/stderr text from ysc.
+	 * @param OutDiagnostics Parsed diagnostics with source locations where available.
+	 */
+	static void ParseCompilerDiagnostics(const FString& CompilerOutput, TArray<struct FYarnProjectDiagnostic>& OutDiagnostics);
 
 	/**
 	 * Parse a compiled .yarnc file.

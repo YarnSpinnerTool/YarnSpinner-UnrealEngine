@@ -1729,9 +1729,14 @@ void UYarnDialogueRunner::HandlePrepareForLines(const TArray<FString>& LineIDs)
 		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Preparing for %d lines in upcoming node"), LineIDs.Num());
 	}
 
+	// Give the line provider a chance to preload content (localised audio,
+	// external assets) before the lines run.
+	if (LineProvider)
+	{
+		LineProvider->PrepareForLines(LineIDs);
+	}
+
 	// Notify presenters (if they support it, they can pre-load assets)
-	// For now, we just log the IDs. Presenters can override a PrepareForLines method
-	// if they need to do actual pre-loading.
 	for (UYarnDialoguePresenter* Presenter : DialoguePresenters)
 	{
 		if (Presenter)

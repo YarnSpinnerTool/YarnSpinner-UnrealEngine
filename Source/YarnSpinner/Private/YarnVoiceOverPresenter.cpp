@@ -26,6 +26,9 @@
 // presenters communicate with the runner to signal when they're done.
 #include "YarnDialogueRunner.h"
 
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
+
 // logging macros (UE_LOG with LogYarnSpinner category)
 #include "YarnSpinnerModule.h"
 
@@ -274,8 +277,68 @@ USoundBase* UYarnVoiceOverPresenter::GetVoiceOverClip_Implementation(const FYarn
 		}
 	}
 
+	// if this line shadows another line, use the source line's audio - a
+	// shadow line uses the source line's text and assets, matching the
+	// unity runtime's behaviour.
+	if (!Line.ShadowSourceLineID.IsEmpty())
+	{
+		UYarnDialogueRunner* Runner = GetDialogueRunner();
+		if (Runner && Runner->YarnProject)
+		{
+			if (const FString* SourceMetadata = Runner->YarnProject->LineMetadata.Find(Line.ShadowSourceLineID))
+			{
+				TArray<FString> SourceTags;
+				SourceMetadata->ParseIntoArray(SourceTags, TEXT(" "));
+				for (const FString& Tag : SourceTags)
+				{
+					if (Tag.StartsWith(TEXT("audio:")))
+					{
+						FString AssetPath = Tag.Mid(6);
+						return Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, *AssetPath));
+					}
+				}
+			}
+		}
+	}
+
 	// no audio tag found - return nullptr to indicate no audio for this line
 	return nullptr;
+}
+
+void UYarnVoiceOverPresenter::OnPrepareForLines_Implementation(const TArray<FString>& LineIDs)
+{
+	// preload the audio assets for the upcoming lines so playback starts
+	// without a synchronous load hitch when each line runs.
+	UYarnDialogueRunner* Runner = GetDialogueRunner();
+	if (!Runner || !Runner->YarnProject)
+	{
+		return;
+	}
+
+	TArray<FSoftObjectPath> AssetsToLoad;
+	for (const FString& LineID : LineIDs)
+	{
+		const FString* MetadataStr = Runner->YarnProject->LineMetadata.Find(LineID);
+		if (!MetadataStr)
+		{
+			continue;
+		}
+
+		TArray<FString> Tags;
+		MetadataStr->ParseIntoArray(Tags, TEXT(" "));
+		for (const FString& Tag : Tags)
+		{
+			if (Tag.StartsWith(TEXT("audio:")))
+			{
+				AssetsToLoad.Add(FSoftObjectPath(Tag.Mid(6)));
+			}
+		}
+	}
+
+	if (AssetsToLoad.Num() > 0)
+	{
+		PreloadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(AssetsToLoad);
+	}
 }
 
 // ----------------------------------------------------------------------------

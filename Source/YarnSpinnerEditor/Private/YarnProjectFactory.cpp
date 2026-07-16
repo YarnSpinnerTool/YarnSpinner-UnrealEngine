@@ -20,6 +20,7 @@
 #include "YarnSpinnerModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Internationalization/Regex.h"
 #include "HAL/PlatformProcess.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -187,7 +188,8 @@ UObject* UYarnProjectFactory::FactoryCreateFile(UClass* InClass, UObject* InPare
 
 	// Compile the yarn project
 	FString CompiledPath, LinesPath, MetadataPath, Error;
-	if (!CompileYarnProject(Filename, CompiledPath, LinesPath, MetadataPath, Error))
+	TArray<FYarnProjectDiagnostic> Diagnostics;
+	if (!CompileYarnProject(Filename, CompiledPath, LinesPath, MetadataPath, Diagnostics, Error))
 	{
 		UE_LOG(LogYarnSpinner, Error, TEXT("Failed to compile Yarn project: %s"), *Error);
 		return nullptr;
@@ -195,6 +197,9 @@ UObject* UYarnProjectFactory::FactoryCreateFile(UClass* InClass, UObject* InPare
 
 	// Create the asset
 	UYarnProject* YarnProject = NewObject<UYarnProject>(InParent, InClass, InName, Flags);
+
+	// Retain compiler diagnostics on the asset so warnings stay visible
+	YarnProject->ImportDiagnostics = Diagnostics;
 
 	// Parse the compiled program
 	if (!ParseCompiledProgram(CompiledPath, YarnProject->Program, Error))
@@ -282,7 +287,8 @@ EReimportResult::Type UYarnProjectFactory::Reimport(UObject* Obj)
 
 	// Compile the yarn project
 	FString CompiledPath, LinesPath, MetadataPath, Error;
-	if (!CompileYarnProject(SourcePath, CompiledPath, LinesPath, MetadataPath, Error))
+	TArray<FYarnProjectDiagnostic> Diagnostics;
+	if (!CompileYarnProject(SourcePath, CompiledPath, LinesPath, MetadataPath, Diagnostics, Error))
 	{
 		UE_LOG(LogYarnSpinner, Error, TEXT("Failed to compile Yarn project during reimport: %s"), *Error);
 		return EReimportResult::Failed;
@@ -295,6 +301,7 @@ EReimportResult::Type UYarnProjectFactory::Reimport(UObject* Obj)
 	YarnProject->NodeNames.Empty();
 	YarnProject->Localizations.Empty();
 	YarnProject->BaseLanguage.Empty();
+	YarnProject->ImportDiagnostics = Diagnostics;
 #if WITH_EDITORONLY_DATA
 	YarnProject->ResolvedSourceFiles.Empty();
 #endif
@@ -345,8 +352,63 @@ EReimportResult::Type UYarnProjectFactory::Reimport(UObject* Obj)
 	return EReimportResult::Succeeded;
 }
 
+void UYarnProjectFactory::ParseCompilerDiagnostics(const FString& CompilerOutput, TArray<FYarnProjectDiagnostic>& OutDiagnostics)
+{
+	// ysc prints diagnostics as lines of the form:
+	//   <emoji> WARNING: <file>: <line>:<column> <message>
+	//   <emoji> ERROR: <file>: <line>:<column> <message>
+	// The file/location prefix is omitted when the diagnostic has no source
+	// location, so both shapes have to parse.
+
+	TArray<FString> Lines;
+	CompilerOutput.ParseIntoArrayLines(Lines);
+
+	for (const FString& Line : Lines)
+	{
+		FString Severity;
+		int32 MarkerIndex = Line.Find(TEXT("WARNING: "));
+		if (MarkerIndex != INDEX_NONE)
+		{
+			Severity = TEXT("Warning");
+			MarkerIndex += 9; // length of "WARNING: "
+		}
+		else
+		{
+			MarkerIndex = Line.Find(TEXT("ERROR: "));
+			if (MarkerIndex == INDEX_NONE)
+			{
+				continue;
+			}
+			Severity = TEXT("Error");
+			MarkerIndex += 7; // length of "ERROR: "
+		}
+
+		FYarnProjectDiagnostic Diagnostic;
+		Diagnostic.Severity = Severity;
+
+		FString Rest = Line.Mid(MarkerIndex);
+
+		// Try to split off "<file>: <line>:<column> " from the front
+		FRegexPattern LocationPattern(TEXT("^(.+?): ([0-9]+):([0-9]+) (.*)$"));
+		FRegexMatcher LocationMatcher(LocationPattern, Rest);
+		if (LocationMatcher.FindNext())
+		{
+			Diagnostic.FilePath = LocationMatcher.GetCaptureGroup(1);
+			Diagnostic.Line = FCString::Atoi(*LocationMatcher.GetCaptureGroup(2));
+			Diagnostic.Column = FCString::Atoi(*LocationMatcher.GetCaptureGroup(3));
+			Diagnostic.Message = LocationMatcher.GetCaptureGroup(4);
+		}
+		else
+		{
+			Diagnostic.Message = Rest;
+		}
+
+		OutDiagnostics.Add(Diagnostic);
+	}
+}
+
 bool UYarnProjectFactory::CompileYarnProject(const FString& ProjectPath, FString& OutCompiledPath, FString& OutLinesPath,
-	FString& OutMetadataPath, FString& OutError)
+	FString& OutMetadataPath, TArray<FYarnProjectDiagnostic>& OutDiagnostics, FString& OutError)
 {
 	FString YscPath = GetYscPath();
 	if (YscPath.IsEmpty())
@@ -377,6 +439,22 @@ bool UYarnProjectFactory::CompileYarnProject(const FString& ProjectPath, FString
 	{
 		OutError = FString::Printf(TEXT("Failed to launch ysc: %s"), *YscPath);
 		return false;
+	}
+
+	// Collect compiler diagnostics from the output. Warnings don't fail the
+	// compile, but they're retained on the project asset and logged with
+	// source locations so problems stay visible after import.
+	ParseCompilerDiagnostics(StdOut + TEXT("\n") + StdErr, OutDiagnostics);
+	for (const FYarnProjectDiagnostic& Diagnostic : OutDiagnostics)
+	{
+		if (Diagnostic.Severity == TEXT("Error"))
+		{
+			UE_LOG(LogYarnSpinner, Error, TEXT("%s(%d,%d): %s"), *Diagnostic.FilePath, Diagnostic.Line, Diagnostic.Column, *Diagnostic.Message);
+		}
+		else
+		{
+			UE_LOG(LogYarnSpinner, Warning, TEXT("%s(%d,%d): %s"), *Diagnostic.FilePath, Diagnostic.Line, Diagnostic.Column, *Diagnostic.Message);
+		}
 	}
 
 	if (ReturnCode != 0)
@@ -1077,11 +1155,15 @@ bool FYarnProtobufParser::ParseNode(FYarnNode& OutNode)
 
 				FYarnInstruction Instruction;
 				InstructionParser.ParseInstruction(Instruction);
-				// Only add valid instructions (skip Invalid, e.g. from unsupported field tags like pushNull)
-				if (Instruction.Type != EYarnInstructionType::Invalid)
+				// Always keep the instruction, even if its type is unrecognised (Invalid).
+				// Jump destinations are instruction indices, so dropping an entry would
+				// shift every later destination in the node. The VM halts if an Invalid
+				// instruction is executed, matching the C# runtime's behaviour.
+				if (Instruction.Type == EYarnInstructionType::Invalid)
 				{
-					OutNode.Instructions.Add(Instruction);
+					UE_LOG(LogYarnSpinner, Warning, TEXT("Node '%s': instruction %d has an unrecognised type and will halt the VM if executed"), *OutNode.Name, OutNode.Instructions.Num());
 				}
+				OutNode.Instructions.Add(Instruction);
 			}
 			break;
 
@@ -1485,13 +1567,9 @@ bool FYarnProtobufParser::ParseInstruction(FYarnInstruction& OutInstruction)
 			ReadBytes();
 			break;
 
-		case 24: // pushNull - not in proto v2 instruction set, compiler never generates this
-			UE_LOG(LogYarnSpinner, Warning, TEXT("Encountered field tag 24 (pushNull) which is not in the v2 instruction set - ignoring"));
-			ReadBytes();  // Consume bytes but don't create an instruction
-			OutInstruction.Type = EYarnInstructionType::Invalid;
-			break;
-
 		default:
+			// Unknown field: skip by wire type, exactly as generated protobuf code
+			// does. Fields beyond 23 don't exist in the current schema.
 			SkipField(WireType);
 			break;
 		}

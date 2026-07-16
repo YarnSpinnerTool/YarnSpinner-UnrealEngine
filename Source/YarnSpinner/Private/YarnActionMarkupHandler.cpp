@@ -109,10 +109,14 @@ float UYarnPauseEventProcessor::OnCharacterWillAppear_Implementation(int32 Chara
 		return 0.0f;
 	}
 
-	// Check if there's a pause at this position
+	// Check if there's a pause at this position. Consume it so the reveal
+	// doesn't pause again when this character is re-dispatched after the
+	// pause elapses (matching the C# processor, which pops consumed pauses).
 	if (const float* Duration = PausePositions.Find(CharacterIndex))
 	{
-		return *Duration;
+		const float Result = *Duration;
+		PausePositions.Remove(CharacterIndex);
+		return Result;
 	}
 
 	return 0.0f;

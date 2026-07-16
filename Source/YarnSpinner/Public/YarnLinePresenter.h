@@ -19,6 +19,7 @@
 
 #include "CoreMinimal.h"
 #include "YarnDialoguePresenter.h"
+#include "YarnActionMarkupHandler.h"
 #include "Components/TextBlock.h"
 #include "Components/PanelWidget.h"
 #include "YarnLinePresenter.generated.h"
@@ -164,7 +165,27 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Yarn Spinner|Typewriter")
 	bool IsTypewriting() const { return bIsTypewriting; }
 
+	/**
+	 * The registry that forwards typewriter events to action markup handlers
+	 * ([pause/], markup events, sound effects). Handler components on the
+	 * owning actor are discovered and registered automatically at BeginPlay;
+	 * use this to register additional handlers at runtime.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner|Typewriter")
+	UYarnActionMarkupHandlerRegistry* GetActionMarkupRegistry() const { return ActionMarkupRegistry; }
+
 protected:
+	/** Forwards typewriter events to action markup handlers */
+	UPROPERTY()
+	UYarnActionMarkupHandlerRegistry* ActionMarkupRegistry;
+
+	/** Seconds left in a pause requested by an action markup handler ([pause/]) */
+	float PendingPauseTime = 0.0f;
+
+	/** Offset from displayed-text indices to TextMarkup.Text indices
+	 * (non-zero when the character name prefix isn't part of the displayed text) */
+	int32 MarkupIndexOffset = 0;
+
 	/** The full text to display */
 	FString FullText;
 
@@ -194,6 +215,9 @@ protected:
 
 	/** Set visibility of the line container */
 	void SetLineContainerVisible(bool bVisible);
+
+	/** Tell action markup handlers the line is about to be dismissed */
+	void NotifyLineWillDismiss();
 
 	/** Set visibility of the character name container */
 	void SetCharacterNameVisible(bool bVisible);

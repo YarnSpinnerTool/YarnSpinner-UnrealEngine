@@ -138,34 +138,41 @@ FYarnLocalizedLine UYarnBuiltinLineProvider::GetLocalizedLine_Implementation(con
 	}
 
 	// --------------------------------------------------------------------
-	// substitutions and character name parsing
+	// substitutions and markup parsing
 	// --------------------------------------------------------------------
 	// substitutions are placeholders like {0}, {1} that get replaced with
-	// runtime values. we apply them before parsing character names because
-	// the character name might come from a substitution.
+	// runtime values. we apply them before parsing markup, matching the
+	// order the C# runtime uses (expand substitutions, then parse).
 
 	LocalizedText = UYarnLocalizationLibrary::ApplySubstitutions(LocalizedText, Line.Substitutions);
 
-	// try to parse a character name from the "Name: dialogue" format.
-	// if found, we strip the name from the displayed text to avoid duplication
-	// (the name is typically shown separately in the ui).
-	FString DialogueText;
-	if (UYarnLocalizationLibrary::ParseCharacterFromLine(LocalizedText, LocalizedLine.CharacterName, DialogueText))
-	{
-		// character name found - use the text without the name prefix
-		LocalizedLine.Text = FText::FromString(DialogueText);
-		LocalizedLine.TextWithoutCharacterName = FText::FromString(DialogueText);
-	}
-	else
-	{
-		// no character name - use the full text
-		LocalizedLine.Text = FText::FromString(LocalizedText);
-		LocalizedLine.TextWithoutCharacterName = FText::FromString(LocalizedText);
-	}
+	// parse markup with the locale we resolved the text in, so plural and
+	// ordinal markers use the right language's rules. this also extracts
+	// the character name (from "Name: dialogue" or [character] markup) and
+	// runs any registered marker processors.
+	FYarnMarkupParseResult ParseResult = UYarnMarkupLibrary::ParseMarkupFull(
+		LocalizedText,
+		Locale,
+		true, // add implicit character attribute
+		MarkerProcessors
+	);
+
+	LocalizedLine.TextMarkup = ParseResult;
+	LocalizedLine.Text = FText::FromString(ParseResult.Text);
+	LocalizedLine.CharacterName = ParseResult.CharacterName;
+	LocalizedLine.TextWithoutCharacterName = FText::FromString(ParseResult.TextWithoutCharacterName);
 
 	// get metadata using the original line id, not the shadow source.
 	// metadata is specific to each line, even if the text comes from elsewhere.
 	LocalizedLine.Metadata = GetLineMetadata(Line.LineID);
+
+	// record where the text came from if this line shadows another, so asset
+	// lookups (voice over) can use the source line's assets, matching the
+	// unity runtime.
+	if (LookupLineID != Line.LineID)
+	{
+		LocalizedLine.ShadowSourceLineID = LookupLineID;
+	}
 
 	return LocalizedLine;
 }

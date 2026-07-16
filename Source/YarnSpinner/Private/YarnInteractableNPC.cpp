@@ -37,6 +37,9 @@
 // for finding the player pawn
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "Engine/World.h"
+#include "Engine/SkeletalMesh.h"
+#include "UObject/ConstructorHelpers.h"
 
 // ============================================================================
 // AYarnInteractableNPC

@@ -43,6 +43,7 @@
 
 // enhanced input (UE5+ only)
 #if YARNSPINNER_WITH_ENHANCED_INPUT
+#include "Engine/LocalPlayer.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
