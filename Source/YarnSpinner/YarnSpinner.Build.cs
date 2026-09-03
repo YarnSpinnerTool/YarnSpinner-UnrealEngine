@@ -40,14 +40,9 @@ public class YarnSpinner : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"UMG",
+				"DeveloperSettings",
 			}
 		);
-
-		// Enhanced Input is only available in UE5+
-		if (Target.Version.MajorVersion >= 5)
-		{
-			PublicDependencyModuleNames.Add("EnhancedInput");
-		}
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[]

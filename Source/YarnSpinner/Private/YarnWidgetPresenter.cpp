@@ -45,9 +45,9 @@ void UYarnWidgetPresenter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void UYarnWidgetPresenter::CreateWidget()
+void UYarnWidgetPresenter::CreateDialogueWidget()
 {
-	UE_LOG(LogYarnSpinner, Log, TEXT("YarnWidgetPresenter: CreateWidget called"));
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnWidgetPresenter: CreateDialogueWidget called"));
 
 	if (DialogueWidget)
 	{
@@ -114,7 +114,7 @@ void UYarnWidgetPresenter::OnDialogueStarted_Implementation()
 	// Create widget on-demand when dialogue starts (handles AutoStart timing)
 	if (!DialogueWidget)
 	{
-		CreateWidget();
+		CreateDialogueWidget();
 	}
 
 	if (DialogueWidget)
@@ -134,7 +134,7 @@ void UYarnWidgetPresenter::OnDialogueComplete_Implementation()
 
 void UYarnWidgetPresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, bool bCanHurry)
 {
-	UE_LOG(LogYarnSpinner, Log, TEXT("YarnWidgetPresenter: RunLine Character='%s' Text='%s'"),
+	UE_LOG(LogYarnSpinner, Verbose, TEXT("YarnWidgetPresenter: RunLine Character='%s' Text='%s'"),
 		*Line.CharacterName, *Line.TextWithoutCharacterName.ToString());
 
 	if (DialogueWidget)
@@ -147,6 +147,7 @@ void UYarnWidgetPresenter::RunLine_Implementation(const FYarnLocalizedLine& Line
 	else
 	{
 		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnWidgetPresenter: No dialogue widget!"));
+		OnLinePresentationComplete();
 	}
 }
 

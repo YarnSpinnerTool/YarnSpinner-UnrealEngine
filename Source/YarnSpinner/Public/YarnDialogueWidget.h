@@ -34,15 +34,13 @@ class SBorder;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnYarnDialogueContinue);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnYarnOptionChosen, int32, OptionIndex);
 
-/**
+ /**
  * A ready-to-use dialogue widget for displaying Yarn Spinner dialogue.
- *
  * This widget provides a simple but functional dialogue UI with:
  * - Character name display
  * - Dialogue text with typewriter effect
  * - Option buttons for choices
  * - Continue button/click to advance
- *
  * You can use this directly or subclass it for customization.
  * For Blueprint customization, create a Widget Blueprint that derives from this class
  * and use BindWidget meta to connect your own UI elements.
@@ -63,7 +61,7 @@ public:
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
 	virtual bool NativeSupportsKeyboardFocus() const override { return true; }
 
-	/**
+	 /**
 	 * Show a line of dialogue.
 	 * @param CharacterName The name of the speaking character (empty if none).
 	 * @param DialogueText The dialogue text to display.
@@ -72,48 +70,48 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
 	void ShowLine(const FString& CharacterName, const FString& DialogueText, bool bUseTypewriter = true);
 
-	/**
+	 /**
 	 * Show dialogue options.
 	 * @param Options The options to display.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
 	void ShowOptions(const TArray<FYarnOption>& Options);
 
-	/**
+	 /**
 	 * Hide the options panel.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
 	void HideOptions();
 
-	/**
+	 /**
 	 * Show the dialogue widget.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
 	void ShowDialogue();
 
-	/**
+	 /**
 	 * Hide the dialogue widget.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
 	void HideDialogue();
 
-	/**
+	 /**
 	 * Skip the typewriter effect and show full text.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
 	void SkipTypewriter();
 
-	/**
+	 /**
 	 * Check if typewriter is currently running.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Dialogue Widget")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner|Dialogue Widget")
 	bool IsTypewriting() const { return bIsTypewriting; }
 
 	/** Called when the player wants to continue (click or button). */
 	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Dialogue Widget")
 	FOnYarnDialogueContinue OnContinue;
 
-	/**
+	 /**
 	 * Called when the current line is fully displayed — the typewriter
 	 * finished (naturally or skipped), or the line was shown instantly.
 	 * The widget presenter uses this to arm auto-advance.
@@ -154,27 +152,27 @@ protected:
 
 	/** The main container panel. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Yarn Spinner|Dialogue Widget")
-	UCanvasPanel* RootCanvas;
+	TObjectPtr<UCanvasPanel> RootCanvas;
 
 	/** The dialogue box background. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Yarn Spinner|Dialogue Widget")
-	UBorder* DialogueBox;
+	TObjectPtr<UBorder> DialogueBox;
 
 	/** Text block for character name. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Yarn Spinner|Dialogue Widget")
-	UTextBlock* CharacterNameText;
+	TObjectPtr<UTextBlock> CharacterNameText;
 
 	/** Text block for dialogue. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Yarn Spinner|Dialogue Widget")
-	UTextBlock* DialogueText;
+	TObjectPtr<UTextBlock> DialogueText;
 
 	/** Container for option buttons. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Yarn Spinner|Dialogue Widget")
-	UVerticalBox* OptionsContainer;
+	TObjectPtr<UVerticalBox> OptionsContainer;
 
 	/** Continue indicator text. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Yarn Spinner|Dialogue Widget")
-	UTextBlock* ContinueIndicator;
+	TObjectPtr<UTextBlock> ContinueIndicator;
 
 private:
 	// Slate widgets for programmatic UI

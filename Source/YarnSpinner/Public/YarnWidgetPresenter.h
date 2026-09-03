@@ -20,21 +20,16 @@
 // ============================================================================
 // YarnWidgetPresenter.h
 // ============================================================================
-//
 // A ready-to-use presenter that displays dialogue using UMG widgets. It creates
 // a UYarnDialogueWidget (or your custom subclass) and handles all the interaction
 // between the dialogue runner and the widget.
-//
 // BLUEPRINT VS C++ USAGE:
 // Blueprint users:
-//   - Add this component to your actor (or use AYarnVoiceOverDemo).
 //   - Configure appearance via the properties (TypewriterSpeed, colours, etc.).
 //   - Optionally create a custom UYarnDialogueWidget blueprint for advanced UI.
-//
 // C++ users:
 //   - Can subclass this for custom behaviour.
 //   - Can subclass UYarnDialogueWidget for custom UI.
-//
 // QUICK START:
 //   1. Add UYarnWidgetPresenter to your dialogue runner's presenters array.
 //   2. Run the game - a default dialogue UI will appear.
@@ -60,12 +55,10 @@ class UYarnDialogueWidget;
 // UYarnWidgetPresenter
 // ============================================================================
 
-/**
+ /**
  * A dialogue presenter that displays dialogue using a UMG widget.
- *
  * Automatically creates and manages a UYarnDialogueWidget for displaying
  * dialogue text, character names, and option buttons.
- *
  * @see UYarnDialogueWidget for the widget that handles the actual display
  */
 UCLASS(ClassGroup = (YarnSpinner), meta = (BlueprintSpawnableComponent), Blueprintable, BlueprintType)
@@ -98,7 +91,7 @@ public:
 	// ------------------------------------------------------------------------
 	// Configure these in the editor to customise the look of your dialogue UI.
 
-	/**
+	 /**
 	 * Typewriter speed (characters per second).
 	 * Set to 0 for instant text display (no typewriter effect).
 	 */
@@ -121,7 +114,7 @@ public:
 	// widget settings
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * The widget class to use for the dialogue UI.
 	 * Defaults to UYarnDialogueWidget. Set this to your own blueprint
 	 * widget class for custom UI.
@@ -129,7 +122,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Widget")
 	TSubclassOf<UYarnDialogueWidget> WidgetClass;
 
-	/**
+	 /**
 	 * Get the current dialogue widget instance.
 	 * @return the widget, or nullptr if dialogue hasn't started.
 	 */
@@ -139,10 +132,10 @@ public:
 protected:
 	/** The dialogue widget instance created at runtime. */
 	UPROPERTY()
-	UYarnDialogueWidget* DialogueWidget;
+	TObjectPtr<UYarnDialogueWidget> DialogueWidget;
 
 	/** Create the widget instance if it doesn't exist. */
-	void CreateWidget();
+	void CreateDialogueWidget();
 
 	/** Callback when the widget signals continue (player pressed advance). */
 	UFUNCTION()

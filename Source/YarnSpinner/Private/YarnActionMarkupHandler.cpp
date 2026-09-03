@@ -17,79 +17,65 @@
 
 #include "YarnActionMarkupHandler.h"
 #include "YarnSpinnerModule.h"
+#include "YarnDialoguePresenter.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/AssetManager.h"
 
 // ============================================================================
-// UYarnActionMarkupHandlerComponent
-// ============================================================================
 
-void UYarnActionMarkupHandlerComponent::OnPrepareForLine_Implementation(const FYarnMarkupParseResult& ParseResult)
+void UYarnBlueprintActionMarkupHandler::OnPrepareForLine(UYarnDialoguePresenter* Presenter, const FYarnMarkupParseResult& ParseResult)
 {
-	CurrentParseResult = ParseResult;
+	ReceiveOnPrepareForLine(Presenter, ParseResult);
 }
 
-void UYarnActionMarkupHandlerComponent::OnLineDisplayBegin_Implementation(const FYarnMarkupParseResult& ParseResult)
+void UYarnBlueprintActionMarkupHandler::OnLineDisplayBegin(UYarnDialoguePresenter* Presenter, const FYarnMarkupParseResult& ParseResult)
 {
-	// Default does nothing - override in subclasses
+	ReceiveOnLineDisplayBegin(Presenter, ParseResult);
 }
 
-float UYarnActionMarkupHandlerComponent::OnCharacterWillAppear_Implementation(int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
+float UYarnBlueprintActionMarkupHandler::OnCharacterWillAppear(UYarnDialoguePresenter* Presenter, int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
 {
-	// Default returns no delay
-	return 0.0f;
+	return ReceiveOnCharacterWillAppear(Presenter, CharacterIndex, ParseResult, CancellationToken);
 }
 
-void UYarnActionMarkupHandlerComponent::OnLineDisplayComplete_Implementation()
+void UYarnBlueprintActionMarkupHandler::OnLineDisplayComplete(UYarnDialoguePresenter* Presenter)
 {
-	// Default does nothing
+	ReceiveOnLineDisplayComplete(Presenter);
 }
 
-void UYarnActionMarkupHandlerComponent::OnLineWillDismiss_Implementation()
+void UYarnBlueprintActionMarkupHandler::OnLineWillDismiss(UYarnDialoguePresenter* Presenter)
 {
-	// Default does nothing
+	ReceiveOnLineWillDismiss(Presenter);
 }
 
 // ============================================================================
 // UYarnPauseEventProcessor
 // ============================================================================
 
-UYarnPauseEventProcessor::UYarnPauseEventProcessor()
+void UYarnPauseEventProcessor::OnPrepareForLine(UYarnDialoguePresenter* Presenter, const FYarnMarkupParseResult& ParseResult)
 {
-	PrimaryComponentTick.bCanEverTick = false;
-}
-
-void UYarnPauseEventProcessor::OnPrepareForLine_Implementation(const FYarnMarkupParseResult& ParseResult)
-{
-	Super::OnPrepareForLine_Implementation(ParseResult);
-
-	// Find all pause markers and record their positions
 	PausePositions.Empty();
 
 	for (const FYarnMarkupAttribute& Attr : ParseResult.Attributes)
 	{
 		if (Attr.Name.Equals(PauseMarkerName, ESearchCase::IgnoreCase))
 		{
-			// Self-closing pause tags have Length = 0, position is where pause occurs
 			int32 PausePos = Attr.Position;
 
-			// Get duration from properties, or use default
 			float Duration = DefaultPauseDuration;
 
-			// Check for duration property (in seconds)
 			FString DurationStr = Attr.GetProperty(TEXT("duration"));
 			if (!DurationStr.IsEmpty())
 			{
 				Duration = FCString::Atof(*DurationStr);
 			}
 
-			// Also check for shorthand "pause" property (e.g., [pause=1.5/])
 			FString PauseStr = Attr.GetProperty(TEXT("pause"));
 			if (!PauseStr.IsEmpty())
 			{
 				Duration = FCString::Atof(*PauseStr);
 			}
 
-			// Also check for "ms" property (milliseconds)
 			FString MsStr = Attr.GetProperty(TEXT("ms"));
 			if (!MsStr.IsEmpty())
 			{
@@ -101,17 +87,13 @@ void UYarnPauseEventProcessor::OnPrepareForLine_Implementation(const FYarnMarkup
 	}
 }
 
-float UYarnPauseEventProcessor::OnCharacterWillAppear_Implementation(int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
+float UYarnPauseEventProcessor::OnCharacterWillAppear(UYarnDialoguePresenter* Presenter, int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
 {
-	// Check if we're being hurried - skip pauses
 	if (CancellationToken.IsHurryUpRequested())
 	{
 		return 0.0f;
 	}
 
-	// Check if there's a pause at this position. Consume it so the reveal
-	// doesn't pause again when this character is re-dispatched after the
-	// pause elapses (matching the C# processor, which pops consumed pauses).
 	if (const float* Duration = PausePositions.Find(CharacterIndex))
 	{
 		const float Result = *Duration;
@@ -126,20 +108,13 @@ float UYarnPauseEventProcessor::OnCharacterWillAppear_Implementation(int32 Chara
 // UYarnMarkupEventHandler
 // ============================================================================
 
-UYarnMarkupEventHandler::UYarnMarkupEventHandler()
-{
-	PrimaryComponentTick.bCanEverTick = false;
-}
-
 bool UYarnMarkupEventHandler::ShouldHandleAttribute(const FString& AttributeName) const
 {
-	// If no specific attributes are configured, handle all
 	if (AttributesToWatch.Num() == 0)
 	{
 		return true;
 	}
 
-	// Check if this attribute is in our watch list
 	for (const FString& WatchedName : AttributesToWatch)
 	{
 		if (WatchedName.Equals(AttributeName, ESearchCase::IgnoreCase))
@@ -151,11 +126,8 @@ bool UYarnMarkupEventHandler::ShouldHandleAttribute(const FString& AttributeName
 	return false;
 }
 
-void UYarnMarkupEventHandler::OnPrepareForLine_Implementation(const FYarnMarkupParseResult& ParseResult)
+void UYarnMarkupEventHandler::OnPrepareForLine(UYarnDialoguePresenter* Presenter, const FYarnMarkupParseResult& ParseResult)
 {
-	Super::OnPrepareForLine_Implementation(ParseResult);
-
-	// Cache attribute positions for efficient lookup during typewriter
 	SelfClosingAttributes.Empty();
 	RangeStartPositions.Empty();
 	RangeEndPositions.Empty();
@@ -169,7 +141,6 @@ void UYarnMarkupEventHandler::OnPrepareForLine_Implementation(const FYarnMarkupP
 
 		if (Attr.Length == 0)
 		{
-			// Self-closing tag
 			if (bFireForSelfClosingTags)
 			{
 				SelfClosingAttributes.Add(Attr.Position, Attr);
@@ -177,7 +148,6 @@ void UYarnMarkupEventHandler::OnPrepareForLine_Implementation(const FYarnMarkupP
 		}
 		else
 		{
-			// Range tag
 			if (bFireForRangeTags)
 			{
 				RangeStartPositions.Add(Attr.Position, Attr);
@@ -186,48 +156,41 @@ void UYarnMarkupEventHandler::OnPrepareForLine_Implementation(const FYarnMarkupP
 		}
 	}
 
-	// Fire prepare event
 	OnPrepareForLineEvent.Broadcast(ParseResult);
 }
 
-void UYarnMarkupEventHandler::OnLineDisplayBegin_Implementation(const FYarnMarkupParseResult& ParseResult)
+void UYarnMarkupEventHandler::OnLineDisplayBegin(UYarnDialoguePresenter* Presenter, const FYarnMarkupParseResult& ParseResult)
 {
-	Super::OnLineDisplayBegin_Implementation(ParseResult);
 	OnLineDisplayBeginEvent.Broadcast(ParseResult);
 }
 
-float UYarnMarkupEventHandler::OnCharacterWillAppear_Implementation(int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
+float UYarnMarkupEventHandler::OnCharacterWillAppear(UYarnDialoguePresenter* Presenter, int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
 {
-	// Check for self-closing attributes at this position
 	if (const FYarnMarkupAttribute* Attr = SelfClosingAttributes.Find(CharacterIndex))
 	{
 		OnMarkupAttributeEncountered.Broadcast(Attr->Name, CharacterIndex, *Attr);
 	}
 
-	// Check for range starts at this position
 	if (const FYarnMarkupAttribute* Attr = RangeStartPositions.Find(CharacterIndex))
 	{
 		OnMarkupRangeEnter.Broadcast(Attr->Name, CharacterIndex, *Attr);
 	}
 
-	// Check for range ends at this position
 	if (const FYarnMarkupAttribute* Attr = RangeEndPositions.Find(CharacterIndex))
 	{
 		OnMarkupRangeExit.Broadcast(Attr->Name, CharacterIndex, *Attr);
 	}
 
-	return 0.0f; // This handler doesn't add delays
+	return 0.0f;
 }
 
-void UYarnMarkupEventHandler::OnLineDisplayComplete_Implementation()
+void UYarnMarkupEventHandler::OnLineDisplayComplete(UYarnDialoguePresenter* Presenter)
 {
-	Super::OnLineDisplayComplete_Implementation();
 	OnLineDisplayCompleteEvent.Broadcast();
 }
 
-void UYarnMarkupEventHandler::OnLineWillDismiss_Implementation()
+void UYarnMarkupEventHandler::OnLineWillDismiss(UYarnDialoguePresenter* Presenter)
 {
-	Super::OnLineWillDismiss_Implementation();
 	OnLineWillDismissEvent.Broadcast();
 }
 
@@ -235,16 +198,8 @@ void UYarnMarkupEventHandler::OnLineWillDismiss_Implementation()
 // UYarnSoundEffectHandler
 // ============================================================================
 
-UYarnSoundEffectHandler::UYarnSoundEffectHandler()
+void UYarnSoundEffectHandler::OnPrepareForLine(UYarnDialoguePresenter* Presenter, const FYarnMarkupParseResult& ParseResult)
 {
-	PrimaryComponentTick.bCanEverTick = false;
-}
-
-void UYarnSoundEffectHandler::OnPrepareForLine_Implementation(const FYarnMarkupParseResult& ParseResult)
-{
-	Super::OnPrepareForLine_Implementation(ParseResult);
-
-	// Cache sound positions
 	SoundPositions.Empty();
 
 	for (const FYarnMarkupAttribute& Attr : ParseResult.Attributes)
@@ -254,298 +209,122 @@ void UYarnSoundEffectHandler::OnPrepareForLine_Implementation(const FYarnMarkupP
 			SoundPositions.Add(Attr.Position, Attr);
 		}
 	}
+
+	for (const TPair<int32, FYarnMarkupAttribute>& Pair : SoundPositions)
+	{
+		FString SoundName = Pair.Value.GetProperty(TEXT("name"));
+		if (SoundName.IsEmpty())
+		{
+			SoundName = Pair.Value.GetProperty(SoundMarkerName);
+		}
+
+		if (!SoundName.IsEmpty())
+		{
+			RequestSound(FName(*SoundName));
+		}
+	}
 }
 
-float UYarnSoundEffectHandler::OnCharacterWillAppear_Implementation(int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
+float UYarnSoundEffectHandler::OnCharacterWillAppear(UYarnDialoguePresenter* Presenter, int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
 {
-	// Check if there's a sound to play at this position
 	if (const FYarnMarkupAttribute* Attr = SoundPositions.Find(CharacterIndex))
 	{
-		// Get the sound name from the attribute
 		FString SoundName = Attr->GetProperty(TEXT("name"));
 		if (SoundName.IsEmpty())
 		{
-			// Try the attribute's own name property (for [sfx=soundname/] syntax)
 			SoundName = Attr->GetProperty(SoundMarkerName);
 		}
 
 		if (!SoundName.IsEmpty())
 		{
-			// Look up the sound
-			USoundBase* Sound = GetSoundForName(SoundName);
-
-			if (Sound)
-			{
-				// Play the sound
-				UGameplayStatics::PlaySound2D(this, Sound, VolumeMultiplier, PitchMultiplier);
-			}
-			else
-			{
-				// Fire event so Blueprint can handle it
-				OnSoundNotFound.Broadcast(SoundName, CharacterIndex, *Attr);
-			}
+			PlaySoundByName(Presenter, FName(*SoundName), CharacterIndex, *Attr);
 		}
 	}
 
-	return 0.0f; // Sound effects don't add delays by default
+	return 0.0f;
+}
+
+TSharedPtr<FStreamableHandle> UYarnSoundEffectHandler::RequestSound(FName SoundName)
+{
+	const TSoftObjectPtr<USoundBase>* SoftSound = SoundMap.Find(SoundName);
+	if (!SoftSound || SoftSound->IsNull())
+	{
+		return nullptr;
+	}
+
+	if (SoftSound->IsValid())
+	{
+		return nullptr;
+	}
+
+	if (TSharedPtr<FStreamableHandle>* Existing = LoadHandles.Find(SoundName))
+	{
+		return *Existing;
+	}
+
+	TSharedPtr<FStreamableHandle> Handle = UAssetManager::GetStreamableManager().RequestAsyncLoad(SoftSound->ToSoftObjectPath());
+	LoadHandles.Add(SoundName, Handle);
+	return Handle;
+}
+
+void UYarnSoundEffectHandler::PlaySoundByName(UYarnDialoguePresenter* Presenter, FName SoundName, int32 CharacterIndex, const FYarnMarkupAttribute& Attribute)
+{
+	const TSoftObjectPtr<USoundBase>* SoftSound = SoundMap.Find(SoundName);
+	if (!SoftSound || SoftSound->IsNull())
+	{
+		USoundBase* FallbackSound = GetSoundForName(SoundName.ToString());
+		if (FallbackSound)
+		{
+			UGameplayStatics::PlaySound2D(Presenter, FallbackSound, VolumeMultiplier, PitchMultiplier);
+		}
+		else
+		{
+			OnSoundNotFound.Broadcast(SoundName.ToString(), CharacterIndex, Attribute);
+		}
+		return;
+	}
+
+	if (USoundBase* LoadedSound = SoftSound->Get())
+	{
+		UGameplayStatics::PlaySound2D(Presenter, LoadedSound, VolumeMultiplier, PitchMultiplier);
+		return;
+	}
+
+	TSharedPtr<FStreamableHandle> Handle = RequestSound(SoundName);
+	if (!Handle.IsValid())
+	{
+		OnSoundNotFound.Broadcast(SoundName.ToString(), CharacterIndex, Attribute);
+		return;
+	}
+
+	TWeakObjectPtr<UYarnSoundEffectHandler> WeakThis(this);
+	TWeakObjectPtr<UYarnDialoguePresenter> WeakPresenter(Presenter);
+	const float Volume = VolumeMultiplier;
+	const float Pitch = PitchMultiplier;
+	FSoftObjectPath SoundPath = SoftSound->ToSoftObjectPath();
+
+	Handle->BindCompleteDelegate(FStreamableDelegate::CreateLambda([WeakThis, WeakPresenter, SoundPath, Volume, Pitch]()
+	{
+		if (!WeakThis.IsValid() || !WeakPresenter.IsValid())
+		{
+			return;
+		}
+
+		if (USoundBase* Sound = Cast<USoundBase>(SoundPath.ResolveObject()))
+		{
+			UGameplayStatics::PlaySound2D(WeakPresenter.Get(), Sound, Volume, Pitch);
+		}
+	}));
 }
 
 USoundBase* UYarnSoundEffectHandler::GetSoundForName_Implementation(const FString& SoundName)
 {
-	// Look up in the sound map
-	if (USoundBase** Found = SoundMap.Find(SoundName))
+	if (const TSoftObjectPtr<USoundBase>* SoftSound = SoundMap.Find(FName(*SoundName)))
 	{
-		return *Found;
+		return SoftSound->Get();
 	}
 
 	return nullptr;
-}
-
-// ============================================================================
-// UYarnActionMarkupHandlerRegistry
-// ============================================================================
-
-UYarnActionMarkupHandlerRegistry::UYarnActionMarkupHandlerRegistry()
-{
-}
-
-void UYarnActionMarkupHandlerRegistry::RegisterHandler(TScriptInterface<IYarnActionMarkupHandler> Handler)
-{
-	if (!Handler.GetInterface())
-	{
-		return;
-	}
-
-	// Avoid duplicates
-	if (!GlobalHandlers.Contains(Handler))
-	{
-		GlobalHandlers.Add(Handler);
-	}
-}
-
-void UYarnActionMarkupHandlerRegistry::RegisterHandlerForAttribute(const FString& AttributeName, TScriptInterface<IYarnActionMarkupHandler> Handler)
-{
-	if (!Handler.GetInterface() || AttributeName.IsEmpty())
-	{
-		return;
-	}
-
-	TArray<TScriptInterface<IYarnActionMarkupHandler>>& Handlers = AttributeHandlers.FindOrAdd(AttributeName.ToLower());
-
-	// Avoid duplicates
-	if (!Handlers.Contains(Handler))
-	{
-		Handlers.Add(Handler);
-	}
-}
-
-void UYarnActionMarkupHandlerRegistry::UnregisterHandler(TScriptInterface<IYarnActionMarkupHandler> Handler)
-{
-	GlobalHandlers.Remove(Handler);
-
-	// Remove from all attribute handlers
-	for (auto& Pair : AttributeHandlers)
-	{
-		Pair.Value.Remove(Handler);
-	}
-}
-
-void UYarnActionMarkupHandlerRegistry::ClearAllHandlers()
-{
-	GlobalHandlers.Empty();
-	AttributeHandlers.Empty();
-}
-
-TArray<TScriptInterface<IYarnActionMarkupHandler>> UYarnActionMarkupHandlerRegistry::GetHandlersForPosition(int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult) const
-{
-	TArray<TScriptInterface<IYarnActionMarkupHandler>> Result;
-
-	// Always include global handlers
-	Result.Append(GlobalHandlers);
-
-	// Find which attributes are active at this position
-	for (const FYarnMarkupAttribute& Attr : ParseResult.Attributes)
-	{
-		// Check if this position is at the start of the attribute, at the end, or inside it
-		bool bIsRelevant = false;
-
-		if (Attr.Length == 0)
-		{
-			// Self-closing tag - only relevant at exact position
-			bIsRelevant = (CharacterIndex == Attr.Position);
-		}
-		else
-		{
-			// Range tag - relevant at start, end, or anywhere inside
-			bIsRelevant = (CharacterIndex >= Attr.Position && CharacterIndex < Attr.Position + Attr.Length);
-		}
-
-		if (bIsRelevant)
-		{
-			// Look up handlers for this attribute name
-			if (const TArray<TScriptInterface<IYarnActionMarkupHandler>>* Handlers = AttributeHandlers.Find(Attr.Name.ToLower()))
-			{
-				for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : *Handlers)
-				{
-					// Avoid duplicates
-					if (!Result.Contains(Handler))
-					{
-						Result.Add(Handler);
-					}
-				}
-			}
-		}
-	}
-
-	return Result;
-}
-
-void UYarnActionMarkupHandlerRegistry::DispatchPrepareForLine(const FYarnMarkupParseResult& ParseResult)
-{
-	// Dispatch to all global handlers
-	for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : GlobalHandlers)
-	{
-		if (Handler.GetInterface())
-		{
-			IYarnActionMarkupHandler::Execute_OnPrepareForLine(Handler.GetObject(), ParseResult);
-		}
-	}
-
-	// Dispatch to attribute-specific handlers (for any attribute in the parse result)
-	TSet<UObject*> NotifiedObjects;
-	for (const FYarnMarkupAttribute& Attr : ParseResult.Attributes)
-	{
-		if (const TArray<TScriptInterface<IYarnActionMarkupHandler>>* Handlers = AttributeHandlers.Find(Attr.Name.ToLower()))
-		{
-			for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : *Handlers)
-			{
-				if (Handler.GetInterface() && !NotifiedObjects.Contains(Handler.GetObject()))
-				{
-					IYarnActionMarkupHandler::Execute_OnPrepareForLine(Handler.GetObject(), ParseResult);
-					NotifiedObjects.Add(Handler.GetObject());
-				}
-			}
-		}
-	}
-}
-
-void UYarnActionMarkupHandlerRegistry::DispatchLineDisplayBegin(const FYarnMarkupParseResult& ParseResult)
-{
-	// Dispatch to all global handlers
-	for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : GlobalHandlers)
-	{
-		if (Handler.GetInterface())
-		{
-			IYarnActionMarkupHandler::Execute_OnLineDisplayBegin(Handler.GetObject(), ParseResult);
-		}
-	}
-
-	// Dispatch to attribute-specific handlers
-	TSet<UObject*> NotifiedObjects;
-	for (const FYarnMarkupAttribute& Attr : ParseResult.Attributes)
-	{
-		if (const TArray<TScriptInterface<IYarnActionMarkupHandler>>* Handlers = AttributeHandlers.Find(Attr.Name.ToLower()))
-		{
-			for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : *Handlers)
-			{
-				if (Handler.GetInterface() && !NotifiedObjects.Contains(Handler.GetObject()))
-				{
-					IYarnActionMarkupHandler::Execute_OnLineDisplayBegin(Handler.GetObject(), ParseResult);
-					NotifiedObjects.Add(Handler.GetObject());
-				}
-			}
-		}
-	}
-}
-
-float UYarnActionMarkupHandlerRegistry::DispatchCharacterWillAppear(int32 CharacterIndex, const FYarnMarkupParseResult& ParseResult, const FYarnLineCancellationToken& CancellationToken)
-{
-	float MaxDelay = 0.0f;
-
-	// Get all relevant handlers for this position
-	TArray<TScriptInterface<IYarnActionMarkupHandler>> Handlers = GetHandlersForPosition(CharacterIndex, ParseResult);
-
-	for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : Handlers)
-	{
-		if (Handler.GetInterface())
-		{
-			float Delay = IYarnActionMarkupHandler::Execute_OnCharacterWillAppear(Handler.GetObject(), CharacterIndex, ParseResult, CancellationToken);
-			MaxDelay = FMath::Max(MaxDelay, Delay);
-		}
-	}
-
-	return MaxDelay;
-}
-
-void UYarnActionMarkupHandlerRegistry::DispatchLineDisplayComplete()
-{
-	// Dispatch to all global handlers
-	for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : GlobalHandlers)
-	{
-		if (Handler.GetInterface())
-		{
-			IYarnActionMarkupHandler::Execute_OnLineDisplayComplete(Handler.GetObject());
-		}
-	}
-
-	// Dispatch to all attribute handlers (they all need to know the line is done)
-	TSet<UObject*> NotifiedObjects;
-	for (const auto& Pair : AttributeHandlers)
-	{
-		for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : Pair.Value)
-		{
-			if (Handler.GetInterface() && !NotifiedObjects.Contains(Handler.GetObject()))
-			{
-				IYarnActionMarkupHandler::Execute_OnLineDisplayComplete(Handler.GetObject());
-				NotifiedObjects.Add(Handler.GetObject());
-			}
-		}
-	}
-}
-
-void UYarnActionMarkupHandlerRegistry::DispatchLineWillDismiss()
-{
-	// Dispatch to all global handlers
-	for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : GlobalHandlers)
-	{
-		if (Handler.GetInterface())
-		{
-			IYarnActionMarkupHandler::Execute_OnLineWillDismiss(Handler.GetObject());
-		}
-	}
-
-	// Dispatch to all attribute handlers
-	TSet<UObject*> NotifiedObjects;
-	for (const auto& Pair : AttributeHandlers)
-	{
-		for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : Pair.Value)
-		{
-			if (Handler.GetInterface() && !NotifiedObjects.Contains(Handler.GetObject()))
-			{
-				IYarnActionMarkupHandler::Execute_OnLineWillDismiss(Handler.GetObject());
-				NotifiedObjects.Add(Handler.GetObject());
-			}
-		}
-	}
-}
-
-TArray<TScriptInterface<IYarnActionMarkupHandler>> UYarnActionMarkupHandlerRegistry::GetAllHandlers() const
-{
-	TArray<TScriptInterface<IYarnActionMarkupHandler>> Result = GlobalHandlers;
-
-	// Add all attribute handlers, avoiding duplicates
-	for (const auto& Pair : AttributeHandlers)
-	{
-		for (const TScriptInterface<IYarnActionMarkupHandler>& Handler : Pair.Value)
-		{
-			if (!Result.Contains(Handler))
-			{
-				Result.Add(Handler);
-			}
-		}
-	}
-
-	return Result;
 }
 
 // ============================================================================
@@ -652,7 +431,6 @@ bool UYarnMarkupHandlerLibrary::GetBoolProperty(const FYarnMarkupAttribute& Attr
 		return DefaultValue;
 	}
 
-	// Check for various true/false representations
 	if (Value.Equals(TEXT("true"), ESearchCase::IgnoreCase) ||
 		Value.Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
 		Value.Equals(TEXT("yes"), ESearchCase::IgnoreCase))

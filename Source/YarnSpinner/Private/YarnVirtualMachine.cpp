@@ -25,6 +25,9 @@ FYarnVirtualMachine::FYarnVirtualMachine()
 
 void FYarnVirtualMachine::SetProgram(const FYarnProgram& InProgram)
 {
+	CurrentNode = nullptr;
+	CurrentNodeName.Empty();
+
 	Program = InProgram;
 
 	// Only stop if we're actually running, to avoid spurious DialogueCompleteHandler calls
@@ -114,17 +117,15 @@ void FYarnVirtualMachine::ReturnFromNode(const FYarnNode* Node)
 	if (!TrackingVariable.IsEmpty() && VariableStorage.GetInterface())
 	{
 		FYarnValue CurrentValue;
-
+		float Count = 0.0f;
 		if (IYarnVariableStorage::Execute_TryGetValue(VariableStorage.GetObject(), TrackingVariable, CurrentValue))
 		{
-			float NewCount = CurrentValue.ConvertToNumber() + 1.0f;
-			IYarnVariableStorage::Execute_SetValue(VariableStorage.GetObject(), TrackingVariable, FYarnValue(NewCount));
-			UE_LOG(LogYarnSpinner, Verbose, TEXT("Yarn VM: Updated tracking variable '%s' = %f"), *TrackingVariable, NewCount);
+			Count = CurrentValue.ConvertToNumber();
 		}
-		else
-		{
-			UE_LOG(LogYarnSpinner, Error, TEXT("Yarn VM: Failed to get the tracking variable for node %s"), *Node->Name);
-		}
+
+		const float NewCount = Count + 1.0f;
+		IYarnVariableStorage::Execute_SetValue(VariableStorage.GetObject(), TrackingVariable, FYarnValue(NewCount));
+		UE_LOG(LogYarnSpinner, Verbose, TEXT("Yarn VM: Updated tracking variable '%s' = %f"), *TrackingVariable, NewCount);
 	}
 }
 
@@ -238,6 +239,13 @@ bool FYarnVirtualMachine::Continue()
 
 void FYarnVirtualMachine::Stop()
 {
+	if (ExecutionState == EYarnExecutionState::Stopped)
+	{
+		CurrentNode = nullptr;
+		CurrentNodeName.Empty();
+		return;
+	}
+
 	SetExecutionState(EYarnExecutionState::Stopped);
 	CurrentNode = nullptr;
 	CurrentNodeName.Empty();
@@ -300,7 +308,6 @@ void FYarnVirtualMachine::SignalContentComplete()
 	SetExecutionState(EYarnExecutionState::Running);
 }
 
-
 void FYarnVirtualMachine::Push(const FYarnValue& Value)
 {
 	Stack.Add(Value);
@@ -317,15 +324,12 @@ FYarnValue FYarnVirtualMachine::Pop()
 	return Stack.Pop();
 }
 
-const FYarnValue& FYarnVirtualMachine::Peek() const
+FYarnValue FYarnVirtualMachine::Peek() const
 {
-	// Use thread-local storage for the empty value to avoid shared state issues
-	thread_local FYarnValue Empty;
 	if (Stack.Num() == 0)
 	{
 		UE_LOG(LogYarnSpinner, Error, TEXT("Yarn VM: Stack underflow on peek"));
-		Empty = FYarnValue();  // Reset to ensure clean state
-		return Empty;
+		return FYarnValue();
 	}
 	return Stack.Last();
 }
@@ -532,8 +536,28 @@ bool FYarnVirtualMachine::RunInstruction(const FYarnInstruction& Instruction)
 		{
 			FString FunctionName = Instruction.StringOperand;
 
+			if (FunctionExistsHandler.IsBound() && !FunctionExistsHandler.Execute(FunctionName))
+			{
+				UE_LOG(LogYarnSpinner, Error, TEXT("Yarn VM: Unknown function '%s' - halting"), *FunctionName);
+				SetExecutionState(EYarnExecutionState::Error);
+				return false;
+			}
+
 			// The compiler pushes the parameter count before the CallFunc instruction
 			int32 ParamCount = FMath::RoundToInt(Pop().ConvertToNumber());
+
+			if (FunctionParamCountHandler.IsBound())
+			{
+				const int32 ExpectedParamCount = FunctionParamCountHandler.Execute(FunctionName);
+				if (ExpectedParamCount >= 0 && ExpectedParamCount != ParamCount)
+				{
+					UE_LOG(LogYarnSpinner, Error, TEXT("Yarn VM: Function '%s' was registered with %d parameter(s) but the script calls it with %d - halting"),
+						*FunctionName, ExpectedParamCount, ParamCount);
+					SetExecutionState(EYarnExecutionState::Error);
+					return false;
+				}
+			}
+
 			TArray<FYarnValue> Parameters;
 			Parameters.SetNum(ParamCount);
 			for (int32 i = ParamCount - 1; i >= 0; i--)
@@ -573,6 +597,18 @@ bool FYarnVirtualMachine::RunInstruction(const FYarnInstruction& Instruction)
 			if (CallFunctionHandler.IsBound())
 			{
 				FYarnValue Result = CallFunctionHandler.Execute(FunctionName, Parameters);
+
+				if (FunctionErroredHandler.IsBound())
+				{
+					FString ErrorMessage;
+					if (FunctionErroredHandler.Execute(ErrorMessage))
+					{
+						UE_LOG(LogYarnSpinner, Error, TEXT("Yarn VM: [%d] CallFunction: %s() reported an error - halting: %s"),
+							InstructionPointer, *FunctionName, *ErrorMessage);
+						SetExecutionState(EYarnExecutionState::Error);
+						return false;
+					}
+				}
 
 				// Only push the return value for non-void functions. Void functions
 				// return FYarnValue() with Type == None, and pushing that would corrupt
@@ -1008,7 +1044,6 @@ bool FYarnVirtualMachine::RunInstruction(const FYarnInstruction& Instruction)
 			}
 			else
 			{
-				// Fallback: highest complexity among passed candidates, random among ties
 				TArray<FYarnSaliencyCandidate> PassedCandidates;
 				for (const FYarnSaliencyCandidate& Candidate : SaliencyCandidates)
 				{
@@ -1020,19 +1055,37 @@ bool FYarnVirtualMachine::RunInstruction(const FYarnInstruction& Instruction)
 
 				if (PassedCandidates.Num() > 0)
 				{
+					auto GetViewCount = [this](const FYarnSaliencyCandidate& Candidate) -> float
+					{
+						if (VariableStorage.GetObject())
+						{
+							FYarnValue Value;
+							if (IYarnVariableStorage::Execute_TryGetValue(VariableStorage.GetObject(), Candidate.GetViewCountKey(), Value))
+							{
+								return FMath::TruncToFloat(Value.ConvertToNumber());
+							}
+						}
+						return 0.0f;
+					};
+
+					float BestViewCount = GetViewCount(PassedCandidates[0]);
 					int32 BestScore = PassedCandidates[0].ComplexityScore;
 					TArray<int32> BestIndices;
 					BestIndices.Add(0);
 
 					for (int32 i = 1; i < PassedCandidates.Num(); i++)
 					{
-						if (PassedCandidates[i].ComplexityScore > BestScore)
+						const float ViewCount = GetViewCount(PassedCandidates[i]);
+						const int32 Score = PassedCandidates[i].ComplexityScore;
+
+						if (ViewCount < BestViewCount || (ViewCount == BestViewCount && Score > BestScore))
 						{
-							BestScore = PassedCandidates[i].ComplexityScore;
+							BestViewCount = ViewCount;
+							BestScore = Score;
 							BestIndices.Empty();
 							BestIndices.Add(i);
 						}
-						else if (PassedCandidates[i].ComplexityScore == BestScore)
+						else if (ViewCount == BestViewCount && Score == BestScore)
 						{
 							BestIndices.Add(i);
 						}
@@ -1042,8 +1095,13 @@ bool FYarnVirtualMachine::RunInstruction(const FYarnInstruction& Instruction)
 					Selected = PassedCandidates[SelectedIndex];
 					bSelected = true;
 
-					UE_LOG(LogYarnSpinner, Verbose, TEXT("Yarn VM:   => Fallback selection: '%s' (from %d candidates with best score %d)"),
-						*Selected.ContentID, BestIndices.Num(), BestScore);
+					if (VariableStorage.GetObject())
+					{
+						IYarnVariableStorage::Execute_SetValue(VariableStorage.GetObject(), Selected.GetViewCountKey(), FYarnValue(BestViewCount + 1.0f));
+					}
+
+					UE_LOG(LogYarnSpinner, Verbose, TEXT("Yarn VM:   => Fallback selection: '%s' (from %d candidates, views=%f, score=%d)"),
+						*Selected.ContentID, BestIndices.Num(), BestViewCount, BestScore);
 				}
 			}
 
@@ -1099,12 +1157,16 @@ bool FYarnVirtualMachine::RunInstruction(const FYarnInstruction& Instruction)
 
 FString FYarnVirtualMachine::ExpandSubstitutions(const FString& TemplateString, const TArray<FString>& Substitutions)
 {
-	// Process in reverse index order so {10} isn't partially matched when replacing {1}
 	FString Result = TemplateString;
-	for (int32 i = Substitutions.Num() - 1; i >= 0; i--)
+	for (int32 i = 0; i < Substitutions.Num(); i++)
 	{
-		FString Marker = FString::Printf(TEXT("{%d}"), i);
-		Result = Result.Replace(*Marker, *Substitutions[i]);
+		const FString Marker = FString::Printf(TEXT("{%d}"), i);
+		const int32 Index = Result.Find(Marker, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (Index != INDEX_NONE)
+		{
+			Result.RemoveAt(Index, Marker.Len());
+			Result.InsertAt(Index, Substitutions[i]);
+		}
 	}
 	return Result;
 }

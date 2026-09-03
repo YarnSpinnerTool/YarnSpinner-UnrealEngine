@@ -213,7 +213,7 @@ FString FYarnNode::GetHeaderValue(const FString& Key) const
 {
 	for (const FYarnHeader& Header : Headers)
 	{
-		if (Header.Key == Key)
+		if (Header.Key.Equals(Key, ESearchCase::CaseSensitive))
 		{
 			return Header.Value;
 		}
@@ -225,7 +225,7 @@ bool FYarnNode::HasHeader(const FString& Key) const
 {
 	for (const FYarnHeader& Header : Headers)
 	{
-		if (Header.Key == Key)
+		if (Header.Key.Equals(Key, ESearchCase::CaseSensitive))
 		{
 			return true;
 		}
@@ -392,7 +392,7 @@ void UYarnProject::PostInitProperties()
 #endif
 }
 
-#if WITH_EDITORONLY_DATA
+#if WITH_EDITOR
 void UYarnProject::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);

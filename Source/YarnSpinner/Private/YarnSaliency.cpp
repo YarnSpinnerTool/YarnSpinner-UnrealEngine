@@ -85,7 +85,7 @@ int32 UYarnBestLeastRecentlyViewedSaliencyStrategy::GetViewCount(const FYarnSali
 	FYarnValue Value;
 	if (IYarnVariableStorage::Execute_TryGetValue(VariableStorage.GetObject(), Candidate.GetViewCountKey(), Value))
 	{
-		return FMath::RoundToInt(Value.ConvertToNumber());
+		return FMath::TruncToInt(Value.ConvertToNumber());
 	}
 
 	return 0;
@@ -168,7 +168,7 @@ int32 UYarnRandomBestLeastRecentlyViewedSaliencyStrategy::GetViewCount(const FYa
 	FYarnValue Value;
 	if (IYarnVariableStorage::Execute_TryGetValue(VariableStorage.GetObject(), Candidate.GetViewCountKey(), Value))
 	{
-		return FMath::RoundToInt(Value.ConvertToNumber());
+		return FMath::TruncToInt(Value.ConvertToNumber());
 	}
 
 	return 0;

@@ -40,7 +40,6 @@
 // ============================================================================
 // UYarnBuiltinLineProvider
 // ============================================================================
-//
 // The default line provider. Handles looking up localised text from the yarn project's embedded string
 // tables, resolving shadow lines, parsing character names, and applying
 // substitutions.
@@ -62,45 +61,11 @@ FYarnLocalizedLine UYarnBuiltinLineProvider::GetLocalizedLine_Implementation(con
 	// shadow lines are a yarn spinner feature where one line can "shadow"
 	// another, meaning it uses the other line's text. this is useful for
 	// options that should display the same text as a line they reference.
-	//
 	// we need to follow the shadow chain to find the actual text, but we
 	// also need to detect cycles to avoid infinite loops. we use a set to
 	// track visited line ids and a depth limit as a safety measure.
 
-	FString LookupLineID = Line.LineID;
-	TSet<FString> VisitedLineIDs;
-	VisitedLineIDs.Add(Line.LineID);
-
-	// 10 is a reasonable limit - you'd never legitimately have shadow chains
-	// deeper than this, and it protects against malformed data.
-	constexpr int32 MaxShadowDepth = 10;
-	int32 Depth = 0;
-
-	// follow the shadow chain until we hit the end or a problem
-	FString SourceLineID = GetShadowLineSource(LookupLineID);
-	while (!SourceLineID.IsEmpty() && Depth < MaxShadowDepth)
-	{
-		// cycle detection - if we've seen this id before, we have a loop
-		if (VisitedLineIDs.Contains(SourceLineID))
-		{
-			UE_LOG(LogYarnSpinner, Warning, TEXT("Shadow line cycle detected: %s -> %s. Breaking cycle."),
-				*LookupLineID, *SourceLineID);
-			break;
-		}
-
-		// record this id and move to the next in the chain
-		VisitedLineIDs.Add(SourceLineID);
-		LookupLineID = SourceLineID;
-		SourceLineID = GetShadowLineSource(LookupLineID);
-		Depth++;
-	}
-
-	// warn if we hit the depth limit - this suggests something's wrong
-	if (Depth >= MaxShadowDepth)
-	{
-		UE_LOG(LogYarnSpinner, Warning, TEXT("Shadow line chain too deep (>%d) for line %s"),
-			MaxShadowDepth, *Line.LineID);
-	}
+	FString LookupLineID = ResolveShadowLineID(Line.LineID);
 
 	// --------------------------------------------------------------------
 	// text lookup with fallback chain
@@ -144,35 +109,7 @@ FYarnLocalizedLine UYarnBuiltinLineProvider::GetLocalizedLine_Implementation(con
 	// runtime values. we apply them before parsing markup, matching the
 	// order the C# runtime uses (expand substitutions, then parse).
 
-	LocalizedText = UYarnLocalizationLibrary::ApplySubstitutions(LocalizedText, Line.Substitutions);
-
-	// parse markup with the locale we resolved the text in, so plural and
-	// ordinal markers use the right language's rules. this also extracts
-	// the character name (from "Name: dialogue" or [character] markup) and
-	// runs any registered marker processors.
-	FYarnMarkupParseResult ParseResult = UYarnMarkupLibrary::ParseMarkupFull(
-		LocalizedText,
-		Locale,
-		true, // add implicit character attribute
-		MarkerProcessors
-	);
-
-	LocalizedLine.TextMarkup = ParseResult;
-	LocalizedLine.Text = FText::FromString(ParseResult.Text);
-	LocalizedLine.CharacterName = ParseResult.CharacterName;
-	LocalizedLine.TextWithoutCharacterName = FText::FromString(ParseResult.TextWithoutCharacterName);
-
-	// get metadata using the original line id, not the shadow source.
-	// metadata is specific to each line, even if the text comes from elsewhere.
-	LocalizedLine.Metadata = GetLineMetadata(Line.LineID);
-
-	// record where the text came from if this line shadows another, so asset
-	// lookups (voice over) can use the source line's assets, matching the
-	// unity runtime.
-	if (LookupLineID != Line.LineID)
-	{
-		LocalizedLine.ShadowSourceLineID = LookupLineID;
-	}
+	FinalizeLocalizedLine(LocalizedLine, Line, LookupLineID, LocalizedText, Locale);
 
 	return LocalizedLine;
 }
@@ -303,67 +240,9 @@ FString UYarnBuiltinLineProvider::GetLocalizedString(const FString& LineID, cons
 // shadow lines allow one line to use another line's text. this is implemented
 // via metadata tags in the format "shadow:source_line_id".
 
-FString UYarnBuiltinLineProvider::GetShadowLineSource(const FString& LineID) const
-{
-	if (!YarnProject)
-	{
-		return FString();
-	}
-
-	// look up metadata for this line
-	const FString* MetadataStr = YarnProject->LineMetadata.Find(LineID);
-	if (!MetadataStr)
-	{
-		return FString();
-	}
-
-	// parse metadata tags - they're stored as space-separated values
-	TArray<FString> Tags;
-	MetadataStr->ParseIntoArray(Tags, TEXT(" "));
-
-	// look for a shadow: tag
-	for (const FString& Tag : Tags)
-	{
-		if (Tag.StartsWith(TEXT("shadow:")))
-		{
-			// extract the source line id from after the prefix
-			FString SourceID = Tag.Mid(7);  // 7 = length of "shadow:"
-
-			// ensure the source id has the standard "line:" prefix
-			if (!SourceID.StartsWith(TEXT("line:")))
-			{
-				SourceID = TEXT("line:") + SourceID;
-			}
-			return SourceID;
-		}
-	}
-
-	return FString();
-}
-
-TArray<FString> UYarnBuiltinLineProvider::GetLineMetadata(const FString& LineID) const
-{
-	TArray<FString> Result;
-
-	if (!YarnProject)
-	{
-		return Result;
-	}
-
-	// look up and parse the metadata string for this line
-	const FString* MetadataStr = YarnProject->LineMetadata.Find(LineID);
-	if (MetadataStr)
-	{
-		MetadataStr->ParseIntoArray(Result, TEXT(" "));
-	}
-
-	return Result;
-}
-
 // ============================================================================
 // UYarnStringTableLineProvider
 // ============================================================================
-//
 // this provider uses unreal's string table system for localisation. string
 // tables integrate with unreal's localisation dashboard and can be translated
 // using standard unreal workflows.
@@ -373,48 +252,26 @@ FYarnLocalizedLine UYarnStringTableLineProvider::GetLocalizedLine_Implementation
 	FYarnLocalizedLine LocalizedLine;
 	LocalizedLine.RawLine = Line;
 
+	const FString EffectiveLineID = ResolveShadowLineID(Line.LineID);
+
 	FString LocalizedText;
-	if (GetStringTableEntry(Line.LineID, LocalizedText))
+	if (!GetStringTableEntry(EffectiveLineID, LocalizedText))
 	{
-		// found the entry in the string table - apply substitutions and parse
-		LocalizedText = UYarnLocalizationLibrary::ApplySubstitutions(LocalizedText, Line.Substitutions);
-
-		// parse character name from "Name: dialogue" format
-		UYarnLocalizationLibrary::ParseCharacterFromLine(
-			LocalizedText,
-			LocalizedLine.CharacterName,
-			LocalizedText);
-
-		LocalizedLine.Text = FText::FromString(LocalizedText);
-	}
-	else if (bFallbackToBaseText && YarnProject)
-	{
-		// string table entry not found - fall back to base text from the
-		// yarn project if configured to do so
-		FString BaseText = YarnProject->GetBaseText(Line.LineID);
-		if (!BaseText.IsEmpty())
+		if (bFallbackToBaseText && YarnProject)
 		{
-			BaseText = UYarnLocalizationLibrary::ApplySubstitutions(BaseText, Line.Substitutions);
-
-			UYarnLocalizationLibrary::ParseCharacterFromLine(
-				BaseText,
-				LocalizedLine.CharacterName,
-				BaseText);
-
-			LocalizedLine.Text = FText::FromString(BaseText);
+			LocalizedText = YarnProject->GetBaseText(EffectiveLineID);
 		}
-		else
+		if (LocalizedText.IsEmpty())
 		{
 			// absolute last resort - show the line id so at least there's
 			// something visible in the ui
 			LocalizedLine.Text = FText::FromString(Line.LineID);
+			return LocalizedLine;
 		}
 	}
-	else
-	{
-		LocalizedLine.Text = FText::FromString(Line.LineID);
-	}
 
+	const FString Locale = (YarnProject && !YarnProject->BaseLanguage.IsEmpty()) ? YarnProject->BaseLanguage : TEXT("en");
+	FinalizeLocalizedLine(LocalizedLine, Line, EffectiveLineID, LocalizedText, Locale);
 	return LocalizedLine;
 }
 
@@ -443,6 +300,8 @@ void UYarnStringTableLineProvider::ImportYarnProjectToStringTable(UYarnProject* 
 		FString Key = UYarnLocalizationLibrary::LineIDToStringTableKey(Pair.Key);
 		TableRef->SetSourceString(Key, Pair.Value);
 	}
+#else
+	UE_LOG(LogYarnSpinner, Error, TEXT("ImportYarnProjectToStringTable is editor-only; it does nothing in packaged builds. Import the string table in the editor and ship the asset instead."));
 #endif
 }
 
@@ -477,7 +336,6 @@ bool UYarnStringTableLineProvider::GetStringTableEntry(const FString& LineID, FS
 // ============================================================================
 // UYarnCultureAwareLineProvider
 // ============================================================================
-//
 // this provider uses multiple string tables, one per culture, and automatically
 // selects the right one based on unreal's current culture setting. this
 // integrates cleanly with unreal's localisation system.
@@ -487,50 +345,36 @@ FYarnLocalizedLine UYarnCultureAwareLineProvider::GetLocalizedLine_Implementatio
 	FYarnLocalizedLine LocalizedLine;
 	LocalizedLine.RawLine = Line;
 
-	// get the string table for the current culture
-	UStringTable* CurrentStringTable = GetCurrentCultureStringTable();
+	const FString EffectiveLineID = ResolveShadowLineID(Line.LineID);
 
-	if (CurrentStringTable)
+	FString LocalizedText;
+
+	// get the string table for the current culture
+	if (UStringTable* CurrentStringTable = GetCurrentCultureStringTable())
 	{
-		// convert line id to key format and look up
-		FString Key = UYarnLocalizationLibrary::LineIDToStringTableKey(Line.LineID);
+		const FString Key = UYarnLocalizationLibrary::LineIDToStringTableKey(EffectiveLineID);
 		FStringTableConstRef TableRef = CurrentStringTable->GetStringTable();
 		FStringTableEntryConstPtr Entry = TableRef->FindEntry(Key);
 		if (Entry.IsValid())
 		{
-			FString LocalizedText = Entry->GetSourceString();
-			LocalizedText = UYarnLocalizationLibrary::ApplySubstitutions(LocalizedText, Line.Substitutions);
-
-			UYarnLocalizationLibrary::ParseCharacterFromLine(
-				LocalizedText,
-				LocalizedLine.CharacterName,
-				LocalizedText);
-
-			LocalizedLine.Text = FText::FromString(LocalizedText);
-			return LocalizedLine;
+			LocalizedText = Entry->GetSourceString();
 		}
 	}
 
 	// fall back to base text from the yarn project
-	if (bFallbackToBaseText && YarnProject)
+	if (LocalizedText.IsEmpty() && bFallbackToBaseText && YarnProject)
 	{
-		FString BaseText = YarnProject->GetBaseText(Line.LineID);
-		if (!BaseText.IsEmpty())
-		{
-			BaseText = UYarnLocalizationLibrary::ApplySubstitutions(BaseText, Line.Substitutions);
-
-			UYarnLocalizationLibrary::ParseCharacterFromLine(
-				BaseText,
-				LocalizedLine.CharacterName,
-				BaseText);
-
-			LocalizedLine.Text = FText::FromString(BaseText);
-			return LocalizedLine;
-		}
+		LocalizedText = YarnProject->GetBaseText(EffectiveLineID);
 	}
 
-	// last resort
-	LocalizedLine.Text = FText::FromString(Line.LineID);
+	if (LocalizedText.IsEmpty())
+	{
+		// last resort
+		LocalizedLine.Text = FText::FromString(Line.LineID);
+		return LocalizedLine;
+	}
+
+	FinalizeLocalizedLine(LocalizedLine, Line, EffectiveLineID, LocalizedText, GetCurrentCulture());
 	return LocalizedLine;
 }
 

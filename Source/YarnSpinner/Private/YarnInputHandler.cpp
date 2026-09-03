@@ -23,7 +23,7 @@
 UYarnInputHandler::UYarnInputHandler()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.bStartWithTickEnabled = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
 }
 
 void UYarnInputHandler::BeginPlay()
@@ -35,10 +35,35 @@ void UYarnInputHandler::BeginPlay()
 	{
 		DialogueRunner = GetOwner()->FindComponentByClass<UYarnDialogueRunner>();
 	}
+
+	if (DialogueRunner)
+	{
+		DialogueRunner->OnDialogueStart.AddDynamic(this, &UYarnInputHandler::HandleDialogueStarted);
+		DialogueRunner->OnDialogueComplete.AddDynamic(this, &UYarnInputHandler::HandleDialogueCompleted);
+	}
+}
+
+void UYarnInputHandler::HandleDialogueStarted()
+{
+	SetComponentTickEnabled(true);
+}
+
+void UYarnInputHandler::HandleDialogueCompleted()
+{
+	SetComponentTickEnabled(false);
+	bAdvanceKeyWasPressed = false;
+	bCancelKeyWasPressed = false;
+	RecentPressTimes.Empty();
 }
 
 void UYarnInputHandler::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (DialogueRunner)
+	{
+		DialogueRunner->OnDialogueStart.RemoveDynamic(this, &UYarnInputHandler::HandleDialogueStarted);
+		DialogueRunner->OnDialogueComplete.RemoveDynamic(this, &UYarnInputHandler::HandleDialogueCompleted);
+	}
+
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -82,7 +107,6 @@ void UYarnInputHandler::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		bAdvanceKeyWasPressed = bAdvancePressed;
 		bCancelKeyWasPressed = bCancelPressed;
 	}
-	// enhanced input is handled via input action bindings
 }
 
 void UYarnInputHandler::SetInputEnabled(bool bEnabled)

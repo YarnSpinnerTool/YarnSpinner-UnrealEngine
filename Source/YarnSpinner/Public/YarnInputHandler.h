@@ -20,26 +20,21 @@
 // ============================================================================
 // YarnInputHandler.h
 // ============================================================================
-//
 // Handles player input for controlling dialogue flow. Translates button
 // presses into dialogue runner commands (hurry up, advance, cancel).
-//
 // BLUEPRINT VS C++ USAGE:
 // Blueprint users:
 //   - Add this component alongside your dialogue runner.
 //   - Configure input keys/actions in the editor.
 //   - Use SetInputEnabled() to disable input during cutscenes, etc.
-//
 // C++ users:
 //   - Can call TriggerAdvance() / TriggerCancel() directly.
 //   - Can subclass for custom input handling.
-//
 // INPUT FLOW:
 // The two-tier system works like this:
 //   1. First press: hurry up (completes typewriter instantly).
 //   2. Second press: advance to next line.
 //   3. Rapid presses: optionally cancel dialogue entirely.
-//
 // This can be disabled by setting bHurryUpBeforeAdvance = false.
 
 // ----------------------------------------------------------------------------
@@ -52,58 +47,39 @@
 // UActorComponent - this is a component attached to an actor.
 #include "Components/ActorComponent.h"
 
-// Version detection for cross-engine compatibility.
 #include "InputCoreTypes.h"
-#include "YarnSpinnerVersion.h"
-
-// UInputAction - for Enhanced Input System support (UE5+ only).
-#if YARNSPINNER_WITH_ENHANCED_INPUT
-#include "InputAction.h"
-#endif
 
 // Required by Unreal's reflection system.
 #include "YarnInputHandler.generated.h"
 
 class UYarnDialogueRunner;
 
-#if YARNSPINNER_WITH_ENHANCED_INPUT
-class UInputAction;
-#endif
-
 // ============================================================================
 // EYarnInputMode
 // ============================================================================
 
-/**
+ /**
  * Input mode for the yarn input handler.
  * Determines how player input is detected.
  */
 UENUM(BlueprintType)
 enum class EYarnInputMode : uint8
 {
-	/** Use Enhanced Input System actions (UE5 recommended). */
-	EnhancedInput UMETA(DisplayName = "Enhanced Input"),
+	LegacyKeyCode UMETA(DisplayName = "Key Codes"),
 
-	/** Use legacy key codes (simpler setup, UE4 compatible). */
-	LegacyKeyCode UMETA(DisplayName = "Legacy Key Code"),
-
-	/** No automatic input - control dialogue via code only. */
-	None UMETA(DisplayName = "None")
+	None UMETA(DisplayName = "Manual")
 };
 
 // ============================================================================
 // UYarnInputHandler
 // ============================================================================
 
-/**
+ /**
  * Handles player input for dialogue advancement.
- *
  * Listens for input and translates it to dialogue commands:
  *   - Hurry up (speed up typewriter, first press)
  *   - Advance to next line (second press)
  *   - Cancel dialogue (rapid presses or cancel key)
- *
- * Supports both Enhanced Input System (UE5) and legacy key codes.
  */
 UCLASS(ClassGroup = (YarnSpinner), meta = (BlueprintSpawnableComponent), Blueprintable, BlueprintType)
 class YARNSPINNER_API UYarnInputHandler : public UActorComponent
@@ -125,31 +101,15 @@ public:
 	// configuration
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * The dialogue runner to control.
 	 * Set this in the editor or via code before BeginPlay.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input")
-	UYarnDialogueRunner* DialogueRunner;
+	TObjectPtr<UYarnDialogueRunner> DialogueRunner;
 
-	/** Input mode to use (enhanced input, legacy keys, or none). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input")
 	EYarnInputMode InputMode = EYarnInputMode::LegacyKeyCode;
-
-	// ------------------------------------------------------------------------
-	// enhanced input settings (UE5+ only)
-	// ------------------------------------------------------------------------
-	// These are used when InputMode == EnhancedInput.
-	// Create input actions in your project and assign them here.
-	// On UE4 these properties exist but are non-functional (Enhanced Input requires UE5).
-
-	/** Input action for advancing dialogue / hurrying up (UE5+ only). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input|Enhanced Input", meta = (EditCondition = "InputMode == EYarnInputMode::EnhancedInput"))
-	UObject* AdvanceAction;
-
-	/** Input action for cancelling dialogue (UE5+ only). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input|Enhanced Input", meta = (EditCondition = "InputMode == EYarnInputMode::EnhancedInput"))
-	UObject* CancelAction;
 
 	// ------------------------------------------------------------------------
 	// legacy key code settings
@@ -173,28 +133,28 @@ public:
 	// behaviour settings
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * If true, first press hurries up (completes typewriter), second press advances.
 	 * If false, every press advances immediately (skipping hurry-up phase).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input|Behaviour")
 	bool bHurryUpBeforeAdvance = true;
 
-	/**
+	 /**
 	 * Number of rapid presses required to cancel dialogue.
 	 * Set to 0 to disable cancel-by-pressing (only cancel key/action works).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input|Behaviour")
 	int32 PressesToCancel = 3;
 
-	/**
+	 /**
 	 * Time window for counting rapid presses (seconds).
 	 * Presses outside this window don't count towards cancellation.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Input|Behaviour")
 	float RapidPressWindow = 1.0f;
 
-	/**
+	 /**
 	 * Minimum time between input processing (seconds).
 	 * Prevents double-press issues from key bounce.
 	 */
@@ -209,21 +169,21 @@ public:
 	// blueprint-callable methods
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * Enable or disable input handling.
 	 * Useful for cutscenes or when you want to control dialogue via code.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Input")
 	void SetInputEnabled(bool bEnabled);
 
-	/**
+	 /**
 	 * Manually trigger an advance input.
 	 * Use this to advance dialogue from custom input handling.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Input")
 	void TriggerAdvance();
 
-	/**
+	 /**
 	 * Manually trigger a cancel input.
 	 * Immediately stops the dialogue.
 	 */
@@ -234,6 +194,12 @@ protected:
 	// ------------------------------------------------------------------------
 	// internal input processing
 	// ------------------------------------------------------------------------
+
+	UFUNCTION()
+	void HandleDialogueStarted();
+
+	UFUNCTION()
+	void HandleDialogueCompleted();
 
 	/** Process advance input (hurry up or advance depending on state). */
 	void ProcessAdvanceInput();

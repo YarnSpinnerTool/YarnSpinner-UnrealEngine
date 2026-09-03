@@ -14,34 +14,16 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": true,
 	"Installed": false,
-	"Plugins": [
-		{
-			"Name": "EnhancedInput",
-			"Enabled": true
-		}
-	],
 	"Modules": [
 		{
 			"Name": "YarnSpinner",
 			"Type": "Runtime",
-			"LoadingPhase": "Default",
-			"PlatformAllowList": [
-				"Win64",
-				"Mac",
-				"Linux",
-				"IOS",
-				"Android"
-			]
+			"LoadingPhase": "Default"
 		},
 		{
 			"Name": "YarnSpinnerEditor",
 			"Type": "Editor",
-			"LoadingPhase": "Default",
-			"PlatformAllowList": [
-				"Win64",
-				"Mac",
-				"Linux"
-			]
+			"LoadingPhase": "Default"
 		}
 	]
 }

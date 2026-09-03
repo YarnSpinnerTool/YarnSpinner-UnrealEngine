@@ -18,6 +18,8 @@
 #include "YarnMarkup.h"
 #include "YarnSpinnerModule.h"
 #include "Internationalization/Regex.h"
+#include "Internationalization/Culture.h"
+#include "Internationalization/Internationalization.h"
 
 // ============================================================================
 // FYarnMarkupStyle implementation
@@ -202,983 +204,6 @@ FYarnMarkupReplacementResult UYarnStyleMarkupProcessor::ProcessMarkup_Implementa
 	Result.InvisibleCharactersAdded = Text.Len() - OriginalLength;
 
 	return Result;
-}
-
-// ============================================================================
-// CLDR Plural Rules
-// Auto-generated from Unicode CLDR, version 42.0
-// Covers 130+ languages with correct cardinal and ordinal plural rules
-// ============================================================================
-
-namespace YarnPlurals
-{
-	enum class EPluralCase : uint8
-	{
-		Zero,
-		One,
-		Two,
-		Few,
-		Many,
-		Other
-	};
-
-	// ---- Helper functions for plural rule evaluation ----
-
-	static double AbsoluteValue(double Number)
-	{
-		return FMath::Abs(Number);
-	}
-
-	static int32 IntegerValue(double Number)
-	{
-		return static_cast<int32>(FMath::TruncToDouble(Number));
-	}
-
-	static int32 FractionalValue(double Number)
-	{
-		FString Text = FString::SanitizeFloat(Number, 0);
-		int32 DotIdx = Text.Find(TEXT("."));
-		if (DotIdx < 0)
-		{
-			return 0;
-		}
-		FString FracStr = Text.Mid(DotIdx + 1);
-		if (FracStr.IsEmpty())
-		{
-			return 0;
-		}
-		return FCString::Atoi(*FracStr);
-	}
-
-	static int32 VisibleFractionalDigits(double Number, bool bTrailingZeroes)
-	{
-		FString Text = FString::SanitizeFloat(Number, 0);
-		int32 DotIdx = Text.Find(TEXT("."));
-		if (DotIdx < 0)
-		{
-			return 0;
-		}
-		FString FracStr = Text.Mid(DotIdx + 1);
-		if (!bTrailingZeroes)
-		{
-			FracStr.TrimEndInline();
-			// Trim trailing zeroes
-			while (FracStr.Len() > 0 && FracStr[FracStr.Len() - 1] == TEXT('0'))
-			{
-				FracStr = FracStr.Left(FracStr.Len() - 1);
-			}
-		}
-		return FracStr.Len();
-	}
-
-	// ---- Cardinal plural case functions (0-38) ----
-	// Each function implements the CLDR plural rules for a group of languages
-
-	// Bambara, Tibetan, Dzongkha, Indonesian, Japanese, Korean, Lao, Malay,
-	// Burmese, Thai, Vietnamese, Chinese, etc. (always Other)
-	static EPluralCase GetCardinalPluralCase_0(double Number)
-	{
-		return EPluralCase::Other;
-	}
-
-	// Amharic, Assamese, Bangla, Dogri, Persian, Gujarati, Hindi, Kannada, etc.
-	static EPluralCase GetCardinalPluralCase_1(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 i = IntegerValue(Number);
-		if ((i == 0) || (n == 1)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Fula, Armenian, Kabyle
-	static EPluralCase GetCardinalPluralCase_2(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		if ((i == 0) || (i == 1)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Asturian, German, English, Estonian, Finnish, Galician, Dutch, Swedish, etc.
-	static EPluralCase GetCardinalPluralCase_3(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((i == 1) && (v == 0)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Sinhala
-	static EPluralCase GetCardinalPluralCase_4(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 i = IntegerValue(Number);
-		int32 f = FractionalValue(Number);
-		if (((n == 0) || (n == 1)) || ((i == 0) && (f == 1))) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Akan, Bhojpuri, Lingala, Malagasy, Northern Sotho, Punjabi, Tigrinya, Walloon
-	static EPluralCase GetCardinalPluralCase_5(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n >= 0 && n <= 1)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Central Atlas Tamazight
-	static EPluralCase GetCardinalPluralCase_6(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n >= 0 && n <= 1) || (n >= 11 && n <= 99)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Afrikaans, Bulgarian, Greek, Hungarian, Turkish, and many others (n == 1 -> One)
-	static EPluralCase GetCardinalPluralCase_7(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Danish
-	static EPluralCase GetCardinalPluralCase_8(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 i = IntegerValue(Number);
-		int32 t = FractionalValue(Number);
-		if ((n == 1) || (!(t == 0) && ((i == 0) || (i == 1)))) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Icelandic
-	static EPluralCase GetCardinalPluralCase_9(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 t = FractionalValue(Number);
-		if (((t == 0) && ((i % 10) == 1) && !((i % 100) == 11)) || (((t % 10) == 1) && !((t % 100) == 11)))
-			return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Macedonian
-	static EPluralCase GetCardinalPluralCase_10(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		int32 f = FractionalValue(Number);
-		if (((v == 0) && ((i % 10) == 1) && !((i % 100) == 11)) || (((f % 10) == 1) && !((f % 100) == 11)))
-			return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Cebuano, Filipino, Tagalog
-	static EPluralCase GetCardinalPluralCase_11(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		int32 f = FractionalValue(Number);
-		if (((v == 0) && ((i == 1) || (i == 2) || (i == 3))) ||
-			((v == 0) && !(((i % 10) == 4) || ((i % 10) == 6) || ((i % 10) == 9))) ||
-			(!(v == 0) && !(((f % 10) == 4) || ((f % 10) == 6) || ((f % 10) == 9))))
-			return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Latvian, Prussian
-	static EPluralCase GetCardinalPluralCase_12(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		int32 f = FractionalValue(Number);
-		if (((static_cast<int64>(n) % 10) == 0) ||
-			((static_cast<int64>(n) % 100) >= 11 && (static_cast<int64>(n) % 100) <= 19) ||
-			((v == 2) && ((f % 100) >= 11 && (f % 100) <= 19)))
-			return EPluralCase::Zero;
-		if (((static_cast<int64>(n) % 10) == 1 && !((static_cast<int64>(n) % 100) == 11)) ||
-			((v == 2) && ((f % 10) == 1) && !((f % 100) == 11)) ||
-			(!(v == 2) && ((f % 10) == 1)))
-			return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Langi
-	static EPluralCase GetCardinalPluralCase_13(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 i = IntegerValue(Number);
-		if (n == 0) return EPluralCase::Zero;
-		if (((i == 0) || (i == 1)) && !(n == 0)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Colognian
-	static EPluralCase GetCardinalPluralCase_14(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 0) return EPluralCase::Zero;
-		if (n == 1) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Hebrew
-	static EPluralCase GetCardinalPluralCase_15(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((i == 1) && (v == 0)) return EPluralCase::One;
-		if ((i == 2) && (v == 0)) return EPluralCase::Two;
-		if ((i == 0) && !(v == 0)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Inuktitut, Nama, Santali, Northern Sami, etc.
-	static EPluralCase GetCardinalPluralCase_16(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		return EPluralCase::Other;
-	}
-
-	// Tachelhit
-	static EPluralCase GetCardinalPluralCase_17(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 i = IntegerValue(Number);
-		if ((i == 0) || (n == 1)) return EPluralCase::One;
-		if (n >= 2 && n <= 10) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Romanian
-	static EPluralCase GetCardinalPluralCase_18(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((i == 1) && (v == 0)) return EPluralCase::One;
-		if (!(v == 0) || (n == 0) || (!(n == 1) && ((static_cast<int64>(n) % 100) >= 1 && (static_cast<int64>(n) % 100) <= 19)))
-			return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Bosnian, Croatian, Serbo-Croatian, Serbian
-	static EPluralCase GetCardinalPluralCase_19(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		int32 f = FractionalValue(Number);
-		if (((v == 0) && ((i % 10) == 1) && !((i % 100) == 11)) || (((f % 10) == 1) && !((f % 100) == 11)))
-			return EPluralCase::One;
-		if (((v == 0) && ((i % 10) >= 2 && (i % 10) <= 4) && !((i % 100) >= 12 && (i % 100) <= 14)) ||
-			(((f % 10) >= 2 && (f % 10) <= 4) && !((f % 100) >= 12 && (f % 100) <= 14)))
-			return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// French
-	static EPluralCase GetCardinalPluralCase_20(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		if ((i == 0) || (i == 1)) return EPluralCase::One;
-		return EPluralCase::Many;
-	}
-
-	// Portuguese
-	static EPluralCase GetCardinalPluralCase_21(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		if (i >= 0 && i <= 1) return EPluralCase::One;
-		return EPluralCase::Many;
-	}
-
-	// Catalan, Italian, European Portuguese (pt_PT), Venetian
-	static EPluralCase GetCardinalPluralCase_22(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((i == 1) && (v == 0)) return EPluralCase::One;
-		return EPluralCase::Many;
-	}
-
-	// Spanish
-	static EPluralCase GetCardinalPluralCase_23(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		return EPluralCase::Many;
-	}
-
-	// Scottish Gaelic
-	static EPluralCase GetCardinalPluralCase_24(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 1) || (n == 11)) return EPluralCase::One;
-		if ((n == 2) || (n == 12)) return EPluralCase::Two;
-		if ((n >= 3 && n <= 10) || (n >= 13 && n <= 19)) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Slovenian
-	static EPluralCase GetCardinalPluralCase_25(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((v == 0) && ((i % 100) == 1)) return EPluralCase::One;
-		if ((v == 0) && ((i % 100) == 2)) return EPluralCase::Two;
-		if (((v == 0) && ((i % 100) >= 3 && (i % 100) <= 4)) || !(v == 0)) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Lower Sorbian, Upper Sorbian
-	static EPluralCase GetCardinalPluralCase_26(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		int32 f = FractionalValue(Number);
-		if (((v == 0) && ((i % 100) == 1)) || ((f % 100) == 1)) return EPluralCase::One;
-		if (((v == 0) && ((i % 100) == 2)) || ((f % 100) == 2)) return EPluralCase::Two;
-		if (((v == 0) && ((i % 100) >= 3 && (i % 100) <= 4)) || ((f % 100) >= 3 && (f % 100) <= 4))
-			return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Czech, Slovak
-	static EPluralCase GetCardinalPluralCase_27(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((i == 1) && (v == 0)) return EPluralCase::One;
-		if ((i >= 2 && i <= 4) && (v == 0)) return EPluralCase::Few;
-		if (!(v == 0)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Polish
-	static EPluralCase GetCardinalPluralCase_28(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((i == 1) && (v == 0)) return EPluralCase::One;
-		if ((v == 0) && ((i % 10) >= 2 && (i % 10) <= 4) && !((i % 100) >= 12 && (i % 100) <= 14))
-			return EPluralCase::Few;
-		if (((v == 0) && !(i == 1) && ((i % 10) >= 0 && (i % 10) <= 1)) ||
-			((v == 0) && ((i % 10) >= 5 && (i % 10) <= 9)) ||
-			((v == 0) && ((i % 100) >= 12 && (i % 100) <= 14)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Belarusian
-	static EPluralCase GetCardinalPluralCase_29(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (((ni % 10) == 1) && !((ni % 100) == 11)) return EPluralCase::One;
-		if (((ni % 10) >= 2 && (ni % 10) <= 4) && !((ni % 100) >= 12 && (ni % 100) <= 14))
-			return EPluralCase::Few;
-		if (((ni % 10) == 0) || ((ni % 10) >= 5 && (ni % 10) <= 9) || ((ni % 100) >= 11 && (ni % 100) <= 14))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Lithuanian
-	static EPluralCase GetCardinalPluralCase_30(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		int32 f = FractionalValue(Number);
-		if (((ni % 10) == 1) && !((ni % 100) >= 11 && (ni % 100) <= 19)) return EPluralCase::One;
-		if (((ni % 10) >= 2 && (ni % 10) <= 9) && !((ni % 100) >= 11 && (ni % 100) <= 19))
-			return EPluralCase::Few;
-		if (!(f == 0)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Russian, Ukrainian
-	static EPluralCase GetCardinalPluralCase_31(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((v == 0) && ((i % 10) == 1) && !((i % 100) == 11)) return EPluralCase::One;
-		if ((v == 0) && ((i % 10) >= 2 && (i % 10) <= 4) && !((i % 100) >= 12 && (i % 100) <= 14))
-			return EPluralCase::Few;
-		if (((v == 0) && ((i % 10) == 0)) ||
-			((v == 0) && ((i % 10) >= 5 && (i % 10) <= 9)) ||
-			((v == 0) && ((i % 100) >= 11 && (i % 100) <= 14)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Breton
-	static EPluralCase GetCardinalPluralCase_32(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (((ni % 10) == 1) && !(((ni % 100) == 11) || ((ni % 100) == 71) || ((ni % 100) == 91)))
-			return EPluralCase::One;
-		if (((ni % 10) == 2) && !(((ni % 100) == 12) || ((ni % 100) == 72) || ((ni % 100) == 92)))
-			return EPluralCase::Two;
-		if ((((ni % 10) >= 3 && (ni % 10) <= 4) || ((ni % 10) == 9)) &&
-			!(((ni % 100) >= 10 && (ni % 100) <= 19) || ((ni % 100) >= 70 && (ni % 100) <= 79) || ((ni % 100) >= 90 && (ni % 100) <= 99)))
-			return EPluralCase::Few;
-		if (!(n == 0) && ((ni % 1000000) == 0)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Maltese
-	static EPluralCase GetCardinalPluralCase_33(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (n == 1) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		if ((n == 0) || ((ni % 100) >= 3 && (ni % 100) <= 10)) return EPluralCase::Few;
-		if ((ni % 100) >= 11 && (ni % 100) <= 19) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Irish
-	static EPluralCase GetCardinalPluralCase_34(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		if (n >= 3 && n <= 6) return EPluralCase::Few;
-		if (n >= 7 && n <= 10) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Manx
-	static EPluralCase GetCardinalPluralCase_35(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		int32 v = VisibleFractionalDigits(Number, true);
-		if ((v == 0) && ((i % 10) == 1)) return EPluralCase::One;
-		if ((v == 0) && ((i % 10) == 2)) return EPluralCase::Two;
-		if ((v == 0) && (((i % 100) == 0) || ((i % 100) == 20) || ((i % 100) == 40) || ((i % 100) == 60) || ((i % 100) == 80)))
-			return EPluralCase::Few;
-		if (!(v == 0)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Cornish
-	static EPluralCase GetCardinalPluralCase_36(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (n == 0) return EPluralCase::Zero;
-		if (n == 1) return EPluralCase::One;
-		if (((ni % 100) == 2) || ((ni % 100) == 22) || ((ni % 100) == 42) || ((ni % 100) == 62) || ((ni % 100) == 82) ||
-			(((ni % 1000) == 0) && (((ni % 100000) >= 1000 && (ni % 100000) <= 20000) || ((ni % 100000) == 40000) || ((ni % 100000) == 60000) || ((ni % 100000) == 80000))) ||
-			(!(n == 0) && ((ni % 1000000) == 100000)))
-			return EPluralCase::Two;
-		if (((ni % 100) == 3) || ((ni % 100) == 23) || ((ni % 100) == 43) || ((ni % 100) == 63) || ((ni % 100) == 83))
-			return EPluralCase::Few;
-		if (!(n == 1) && (((ni % 100) == 1) || ((ni % 100) == 21) || ((ni % 100) == 41) || ((ni % 100) == 61) || ((ni % 100) == 81)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Arabic, Najdi Arabic
-	static EPluralCase GetCardinalPluralCase_37(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (n == 0) return EPluralCase::Zero;
-		if (n == 1) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		if ((ni % 100) >= 3 && (ni % 100) <= 10) return EPluralCase::Few;
-		if ((ni % 100) >= 11 && (ni % 100) <= 99) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Welsh
-	static EPluralCase GetCardinalPluralCase_38(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 0) return EPluralCase::Zero;
-		if (n == 1) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		if (n == 3) return EPluralCase::Few;
-		if (n == 6) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// ---- Ordinal plural case functions (39-62) ----
-
-	// Most languages: always Other
-	static EPluralCase GetOrdinalPluralCase_39(double Number)
-	{
-		return EPluralCase::Other;
-	}
-
-	// Swedish
-	static EPluralCase GetOrdinalPluralCase_40(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if ((((ni % 10) == 1) || ((ni % 10) == 2)) && !(((ni % 100) == 11) || ((ni % 100) == 12)))
-			return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Filipino, French, Irish, Armenian, Lao, Malay, Romanian, Tagalog, Vietnamese
-	static EPluralCase GetOrdinalPluralCase_41(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Hungarian
-	static EPluralCase GetOrdinalPluralCase_42(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 1) || (n == 5)) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Nepali
-	static EPluralCase GetOrdinalPluralCase_43(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n >= 1 && n <= 4) return EPluralCase::One;
-		return EPluralCase::Other;
-	}
-
-	// Belarusian
-	static EPluralCase GetOrdinalPluralCase_44(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if ((((ni % 10) == 2) || ((ni % 10) == 3)) && !(((ni % 100) == 12) || ((ni % 100) == 13)))
-			return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Ukrainian
-	static EPluralCase GetOrdinalPluralCase_45(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (((ni % 10) == 3) && !((ni % 100) == 13)) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Turkmen
-	static EPluralCase GetOrdinalPluralCase_46(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if ((((ni % 10) == 6) || ((ni % 10) == 9)) || (n == 10)) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Kazakh
-	static EPluralCase GetOrdinalPluralCase_47(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (((ni % 10) == 6) || ((ni % 10) == 9) || (((ni % 10) == 0) && !(n == 0)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Italian, Sardinian, Sicilian, Venetian
-	static EPluralCase GetOrdinalPluralCase_48(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 11) || (n == 8) || (n == 80) || (n == 800)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Ligurian
-	static EPluralCase GetOrdinalPluralCase_49(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 11) || (n == 8) || (n >= 80 && n <= 89) || (n >= 800 && n <= 899))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Georgian
-	static EPluralCase GetOrdinalPluralCase_50(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		if (i == 1) return EPluralCase::One;
-		if ((i == 0) || (((i % 100) >= 2 && (i % 100) <= 20) || ((i % 100) == 40) || ((i % 100) == 60) || ((i % 100) == 80)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Albanian
-	static EPluralCase GetOrdinalPluralCase_51(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (n == 1) return EPluralCase::One;
-		if (((ni % 10) == 4) && !((ni % 100) == 14)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Cornish
-	static EPluralCase GetOrdinalPluralCase_52(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if ((n >= 1 && n <= 4) ||
-			(((ni % 100) >= 1 && (ni % 100) <= 4) || ((ni % 100) >= 21 && (ni % 100) <= 24) ||
-			 ((ni % 100) >= 41 && (ni % 100) <= 44) || ((ni % 100) >= 61 && (ni % 100) <= 64) ||
-			 ((ni % 100) >= 81 && (ni % 100) <= 84)))
-			return EPluralCase::One;
-		if ((n == 5) || ((ni % 100) == 5)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// English
-	static EPluralCase GetOrdinalPluralCase_53(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		int64 ni = static_cast<int64>(n);
-		if (((ni % 10) == 1) && !((ni % 100) == 11)) return EPluralCase::One;
-		if (((ni % 10) == 2) && !((ni % 100) == 12)) return EPluralCase::Two;
-		if (((ni % 10) == 3) && !((ni % 100) == 13)) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Marathi
-	static EPluralCase GetOrdinalPluralCase_54(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		if ((n == 2) || (n == 3)) return EPluralCase::Two;
-		if (n == 4) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Scottish Gaelic
-	static EPluralCase GetOrdinalPluralCase_55(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 1) || (n == 11)) return EPluralCase::One;
-		if ((n == 2) || (n == 12)) return EPluralCase::Two;
-		if ((n == 3) || (n == 13)) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Catalan
-	static EPluralCase GetOrdinalPluralCase_56(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 1) || (n == 3)) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		if (n == 4) return EPluralCase::Few;
-		return EPluralCase::Other;
-	}
-
-	// Macedonian
-	static EPluralCase GetOrdinalPluralCase_57(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		if (((i % 10) == 1) && !((i % 100) == 11)) return EPluralCase::One;
-		if (((i % 10) == 2) && !((i % 100) == 12)) return EPluralCase::Two;
-		if ((((i % 10) == 7) || ((i % 10) == 8)) && !(((i % 100) == 17) || ((i % 100) == 18)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Azerbaijani
-	static EPluralCase GetOrdinalPluralCase_58(double Number)
-	{
-		int32 i = IntegerValue(Number);
-		if ((((i % 10) == 1) || ((i % 10) == 2) || ((i % 10) == 5) || ((i % 10) == 7) || ((i % 10) == 8)) ||
-			(((i % 100) == 20) || ((i % 100) == 50) || ((i % 100) == 70) || ((i % 100) == 80)))
-			return EPluralCase::One;
-		if ((((i % 10) == 3) || ((i % 10) == 4)) ||
-			(((i % 1000) == 100) || ((i % 1000) == 200) || ((i % 1000) == 300) || ((i % 1000) == 400) ||
-			 ((i % 1000) == 500) || ((i % 1000) == 600) || ((i % 1000) == 700) || ((i % 1000) == 800) ||
-			 ((i % 1000) == 900)))
-			return EPluralCase::Few;
-		if ((i == 0) || ((i % 10) == 6) || (((i % 100) == 40) || ((i % 100) == 60) || ((i % 100) == 90)))
-			return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Gujarati, Hindi
-	static EPluralCase GetOrdinalPluralCase_59(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if (n == 1) return EPluralCase::One;
-		if ((n == 2) || (n == 3)) return EPluralCase::Two;
-		if (n == 4) return EPluralCase::Few;
-		if (n == 6) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Assamese, Bangla
-	static EPluralCase GetOrdinalPluralCase_60(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 1) || (n == 5) || (n == 7) || (n == 8) || (n == 9) || (n == 10))
-			return EPluralCase::One;
-		if ((n == 2) || (n == 3)) return EPluralCase::Two;
-		if (n == 4) return EPluralCase::Few;
-		if (n == 6) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Odia
-	static EPluralCase GetOrdinalPluralCase_61(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 1) || (n == 5) || (n >= 7 && n <= 9)) return EPluralCase::One;
-		if ((n == 2) || (n == 3)) return EPluralCase::Two;
-		if (n == 4) return EPluralCase::Few;
-		if (n == 6) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// Welsh
-	static EPluralCase GetOrdinalPluralCase_62(double Number)
-	{
-		double n = AbsoluteValue(Number);
-		if ((n == 0) || (n == 7) || (n == 8) || (n == 9)) return EPluralCase::Zero;
-		if (n == 1) return EPluralCase::One;
-		if (n == 2) return EPluralCase::Two;
-		if ((n == 3) || (n == 4)) return EPluralCase::Few;
-		if ((n == 5) || (n == 6)) return EPluralCase::Many;
-		return EPluralCase::Other;
-	}
-
-	// ---- Dispatch tables ----
-
-	EPluralCase GetCardinalPluralCase(const FString& LanguageCode, double Value)
-	{
-		// No-plural languages (always Other)
-		if (LanguageCode == TEXT("bm") || LanguageCode == TEXT("bo") || LanguageCode == TEXT("dz") ||
-			LanguageCode == TEXT("hnj") || LanguageCode == TEXT("id") || LanguageCode == TEXT("ig") ||
-			LanguageCode == TEXT("ii") || LanguageCode == TEXT("in") || LanguageCode == TEXT("ja") ||
-			LanguageCode == TEXT("jbo") || LanguageCode == TEXT("jv") || LanguageCode == TEXT("jw") ||
-			LanguageCode == TEXT("kde") || LanguageCode == TEXT("kea") || LanguageCode == TEXT("km") ||
-			LanguageCode == TEXT("ko") || LanguageCode == TEXT("lkt") || LanguageCode == TEXT("lo") ||
-			LanguageCode == TEXT("ms") || LanguageCode == TEXT("my") || LanguageCode == TEXT("nqo") ||
-			LanguageCode == TEXT("osa") || LanguageCode == TEXT("root") || LanguageCode == TEXT("sah") ||
-			LanguageCode == TEXT("ses") || LanguageCode == TEXT("sg") || LanguageCode == TEXT("su") ||
-			LanguageCode == TEXT("th") || LanguageCode == TEXT("to") || LanguageCode == TEXT("tpi") ||
-			LanguageCode == TEXT("vi") || LanguageCode == TEXT("wo") || LanguageCode == TEXT("yo") ||
-			LanguageCode == TEXT("yue") || LanguageCode == TEXT("zh"))
-			return GetCardinalPluralCase_0(Value);
-
-		if (LanguageCode == TEXT("am") || LanguageCode == TEXT("as") || LanguageCode == TEXT("bn") ||
-			LanguageCode == TEXT("doi") || LanguageCode == TEXT("fa") || LanguageCode == TEXT("gu") ||
-			LanguageCode == TEXT("hi") || LanguageCode == TEXT("kn") || LanguageCode == TEXT("pcm") ||
-			LanguageCode == TEXT("zu"))
-			return GetCardinalPluralCase_1(Value);
-
-		if (LanguageCode == TEXT("ff") || LanguageCode == TEXT("hy") || LanguageCode == TEXT("kab"))
-			return GetCardinalPluralCase_2(Value);
-
-		if (LanguageCode == TEXT("ast") || LanguageCode == TEXT("de") || LanguageCode == TEXT("en") ||
-			LanguageCode == TEXT("et") || LanguageCode == TEXT("fi") || LanguageCode == TEXT("fy") ||
-			LanguageCode == TEXT("gl") || LanguageCode == TEXT("ia") || LanguageCode == TEXT("io") ||
-			LanguageCode == TEXT("ji") || LanguageCode == TEXT("lij") || LanguageCode == TEXT("nl") ||
-			LanguageCode == TEXT("sc") || LanguageCode == TEXT("scn") || LanguageCode == TEXT("sv") ||
-			LanguageCode == TEXT("sw") || LanguageCode == TEXT("ur") || LanguageCode == TEXT("yi"))
-			return GetCardinalPluralCase_3(Value);
-
-		if (LanguageCode == TEXT("si")) return GetCardinalPluralCase_4(Value);
-
-		if (LanguageCode == TEXT("ak") || LanguageCode == TEXT("bho") || LanguageCode == TEXT("guw") ||
-			LanguageCode == TEXT("ln") || LanguageCode == TEXT("mg") || LanguageCode == TEXT("nso") ||
-			LanguageCode == TEXT("pa") || LanguageCode == TEXT("ti") || LanguageCode == TEXT("wa"))
-			return GetCardinalPluralCase_5(Value);
-
-		if (LanguageCode == TEXT("tzm")) return GetCardinalPluralCase_6(Value);
-
-		if (LanguageCode == TEXT("af") || LanguageCode == TEXT("an") || LanguageCode == TEXT("asa") ||
-			LanguageCode == TEXT("az") || LanguageCode == TEXT("bal") || LanguageCode == TEXT("bem") ||
-			LanguageCode == TEXT("bez") || LanguageCode == TEXT("bg") || LanguageCode == TEXT("brx") ||
-			LanguageCode == TEXT("ce") || LanguageCode == TEXT("cgg") || LanguageCode == TEXT("chr") ||
-			LanguageCode == TEXT("ckb") || LanguageCode == TEXT("dv") || LanguageCode == TEXT("ee") ||
-			LanguageCode == TEXT("el") || LanguageCode == TEXT("eo") || LanguageCode == TEXT("eu") ||
-			LanguageCode == TEXT("fo") || LanguageCode == TEXT("fur") || LanguageCode == TEXT("gsw") ||
-			LanguageCode == TEXT("ha") || LanguageCode == TEXT("haw") || LanguageCode == TEXT("hu") ||
-			LanguageCode == TEXT("jgo") || LanguageCode == TEXT("jmc") || LanguageCode == TEXT("ka") ||
-			LanguageCode == TEXT("kaj") || LanguageCode == TEXT("kcg") || LanguageCode == TEXT("kk") ||
-			LanguageCode == TEXT("kkj") || LanguageCode == TEXT("kl") || LanguageCode == TEXT("ks") ||
-			LanguageCode == TEXT("ksb") || LanguageCode == TEXT("ku") || LanguageCode == TEXT("ky") ||
-			LanguageCode == TEXT("lb") || LanguageCode == TEXT("lg") || LanguageCode == TEXT("mas") ||
-			LanguageCode == TEXT("mgo") || LanguageCode == TEXT("ml") || LanguageCode == TEXT("mn") ||
-			LanguageCode == TEXT("mr") || LanguageCode == TEXT("nah") || LanguageCode == TEXT("nb") ||
-			LanguageCode == TEXT("nd") || LanguageCode == TEXT("ne") || LanguageCode == TEXT("nn") ||
-			LanguageCode == TEXT("nnh") || LanguageCode == TEXT("no") || LanguageCode == TEXT("nr") ||
-			LanguageCode == TEXT("ny") || LanguageCode == TEXT("nyn") || LanguageCode == TEXT("om") ||
-			LanguageCode == TEXT("or") || LanguageCode == TEXT("os") || LanguageCode == TEXT("pap") ||
-			LanguageCode == TEXT("ps") || LanguageCode == TEXT("rm") || LanguageCode == TEXT("rof") ||
-			LanguageCode == TEXT("rwk") || LanguageCode == TEXT("saq") || LanguageCode == TEXT("sd") ||
-			LanguageCode == TEXT("sdh") || LanguageCode == TEXT("seh") || LanguageCode == TEXT("sn") ||
-			LanguageCode == TEXT("so") || LanguageCode == TEXT("sq") || LanguageCode == TEXT("ss") ||
-			LanguageCode == TEXT("ssy") || LanguageCode == TEXT("st") || LanguageCode == TEXT("syr") ||
-			LanguageCode == TEXT("ta") || LanguageCode == TEXT("te") || LanguageCode == TEXT("teo") ||
-			LanguageCode == TEXT("tig") || LanguageCode == TEXT("tk") || LanguageCode == TEXT("tn") ||
-			LanguageCode == TEXT("tr") || LanguageCode == TEXT("ts") || LanguageCode == TEXT("ug") ||
-			LanguageCode == TEXT("uz") || LanguageCode == TEXT("ve") || LanguageCode == TEXT("vo") ||
-			LanguageCode == TEXT("vun") || LanguageCode == TEXT("wae") || LanguageCode == TEXT("xh") ||
-			LanguageCode == TEXT("xog"))
-			return GetCardinalPluralCase_7(Value);
-
-		if (LanguageCode == TEXT("da")) return GetCardinalPluralCase_8(Value);
-		if (LanguageCode == TEXT("is")) return GetCardinalPluralCase_9(Value);
-		if (LanguageCode == TEXT("mk")) return GetCardinalPluralCase_10(Value);
-
-		if (LanguageCode == TEXT("ceb") || LanguageCode == TEXT("fil") || LanguageCode == TEXT("tl"))
-			return GetCardinalPluralCase_11(Value);
-
-		if (LanguageCode == TEXT("lv") || LanguageCode == TEXT("prg"))
-			return GetCardinalPluralCase_12(Value);
-
-		if (LanguageCode == TEXT("lag")) return GetCardinalPluralCase_13(Value);
-		if (LanguageCode == TEXT("ksh")) return GetCardinalPluralCase_14(Value);
-
-		if (LanguageCode == TEXT("he") || LanguageCode == TEXT("iw"))
-			return GetCardinalPluralCase_15(Value);
-
-		if (LanguageCode == TEXT("iu") || LanguageCode == TEXT("naq") || LanguageCode == TEXT("sat") ||
-			LanguageCode == TEXT("se") || LanguageCode == TEXT("sma") || LanguageCode == TEXT("smi") ||
-			LanguageCode == TEXT("smj") || LanguageCode == TEXT("smn") || LanguageCode == TEXT("sms"))
-			return GetCardinalPluralCase_16(Value);
-
-		if (LanguageCode == TEXT("shi")) return GetCardinalPluralCase_17(Value);
-
-		if (LanguageCode == TEXT("mo") || LanguageCode == TEXT("ro"))
-			return GetCardinalPluralCase_18(Value);
-
-		if (LanguageCode == TEXT("bs") || LanguageCode == TEXT("hr") ||
-			LanguageCode == TEXT("sh") || LanguageCode == TEXT("sr"))
-			return GetCardinalPluralCase_19(Value);
-
-		if (LanguageCode == TEXT("fr")) return GetCardinalPluralCase_20(Value);
-		if (LanguageCode == TEXT("pt")) return GetCardinalPluralCase_21(Value);
-
-		if (LanguageCode == TEXT("ca") || LanguageCode == TEXT("it") ||
-			LanguageCode == TEXT("pt_PT") || LanguageCode == TEXT("vec"))
-			return GetCardinalPluralCase_22(Value);
-
-		if (LanguageCode == TEXT("es")) return GetCardinalPluralCase_23(Value);
-		if (LanguageCode == TEXT("gd")) return GetCardinalPluralCase_24(Value);
-		if (LanguageCode == TEXT("sl")) return GetCardinalPluralCase_25(Value);
-
-		if (LanguageCode == TEXT("dsb") || LanguageCode == TEXT("hsb"))
-			return GetCardinalPluralCase_26(Value);
-
-		if (LanguageCode == TEXT("cs") || LanguageCode == TEXT("sk"))
-			return GetCardinalPluralCase_27(Value);
-
-		if (LanguageCode == TEXT("pl")) return GetCardinalPluralCase_28(Value);
-		if (LanguageCode == TEXT("be")) return GetCardinalPluralCase_29(Value);
-		if (LanguageCode == TEXT("lt")) return GetCardinalPluralCase_30(Value);
-
-		if (LanguageCode == TEXT("ru") || LanguageCode == TEXT("uk"))
-			return GetCardinalPluralCase_31(Value);
-
-		if (LanguageCode == TEXT("br")) return GetCardinalPluralCase_32(Value);
-		if (LanguageCode == TEXT("mt")) return GetCardinalPluralCase_33(Value);
-		if (LanguageCode == TEXT("ga")) return GetCardinalPluralCase_34(Value);
-		if (LanguageCode == TEXT("gv")) return GetCardinalPluralCase_35(Value);
-		if (LanguageCode == TEXT("kw")) return GetCardinalPluralCase_36(Value);
-
-		if (LanguageCode == TEXT("ar") || LanguageCode == TEXT("ars"))
-			return GetCardinalPluralCase_37(Value);
-
-		if (LanguageCode == TEXT("cy")) return GetCardinalPluralCase_38(Value);
-
-		return EPluralCase::Other;
-	}
-
-	EPluralCase GetOrdinalPluralCase(const FString& LanguageCode, double Value)
-	{
-		// Most languages: always Other
-		if (LanguageCode == TEXT("af") || LanguageCode == TEXT("am") || LanguageCode == TEXT("an") ||
-			LanguageCode == TEXT("ar") || LanguageCode == TEXT("ast") || LanguageCode == TEXT("bg") ||
-			LanguageCode == TEXT("bs") || LanguageCode == TEXT("ce") || LanguageCode == TEXT("cs") ||
-			LanguageCode == TEXT("da") || LanguageCode == TEXT("de") || LanguageCode == TEXT("dsb") ||
-			LanguageCode == TEXT("el") || LanguageCode == TEXT("es") || LanguageCode == TEXT("et") ||
-			LanguageCode == TEXT("eu") || LanguageCode == TEXT("fa") || LanguageCode == TEXT("fi") ||
-			LanguageCode == TEXT("fy") || LanguageCode == TEXT("gl") || LanguageCode == TEXT("gsw") ||
-			LanguageCode == TEXT("he") || LanguageCode == TEXT("hr") || LanguageCode == TEXT("hsb") ||
-			LanguageCode == TEXT("ia") || LanguageCode == TEXT("id") || LanguageCode == TEXT("in") ||
-			LanguageCode == TEXT("is") || LanguageCode == TEXT("iw") || LanguageCode == TEXT("ja") ||
-			LanguageCode == TEXT("km") || LanguageCode == TEXT("kn") || LanguageCode == TEXT("ko") ||
-			LanguageCode == TEXT("ky") || LanguageCode == TEXT("lt") || LanguageCode == TEXT("lv") ||
-			LanguageCode == TEXT("ml") || LanguageCode == TEXT("mn") || LanguageCode == TEXT("my") ||
-			LanguageCode == TEXT("nb") || LanguageCode == TEXT("nl") || LanguageCode == TEXT("no") ||
-			LanguageCode == TEXT("pa") || LanguageCode == TEXT("pl") || LanguageCode == TEXT("prg") ||
-			LanguageCode == TEXT("ps") || LanguageCode == TEXT("pt") || LanguageCode == TEXT("root") ||
-			LanguageCode == TEXT("ru") || LanguageCode == TEXT("sd") || LanguageCode == TEXT("sh") ||
-			LanguageCode == TEXT("si") || LanguageCode == TEXT("sk") || LanguageCode == TEXT("sl") ||
-			LanguageCode == TEXT("sr") || LanguageCode == TEXT("sw") || LanguageCode == TEXT("ta") ||
-			LanguageCode == TEXT("te") || LanguageCode == TEXT("th") || LanguageCode == TEXT("tpi") ||
-			LanguageCode == TEXT("tr") || LanguageCode == TEXT("ur") || LanguageCode == TEXT("uz") ||
-			LanguageCode == TEXT("yue") || LanguageCode == TEXT("zh") || LanguageCode == TEXT("zu"))
-			return GetOrdinalPluralCase_39(Value);
-
-		if (LanguageCode == TEXT("sv")) return GetOrdinalPluralCase_40(Value);
-
-		if (LanguageCode == TEXT("bal") || LanguageCode == TEXT("fil") || LanguageCode == TEXT("fr") ||
-			LanguageCode == TEXT("ga") || LanguageCode == TEXT("hy") || LanguageCode == TEXT("lo") ||
-			LanguageCode == TEXT("mo") || LanguageCode == TEXT("ms") || LanguageCode == TEXT("ro") ||
-			LanguageCode == TEXT("tl") || LanguageCode == TEXT("vi"))
-			return GetOrdinalPluralCase_41(Value);
-
-		if (LanguageCode == TEXT("hu")) return GetOrdinalPluralCase_42(Value);
-		if (LanguageCode == TEXT("ne")) return GetOrdinalPluralCase_43(Value);
-		if (LanguageCode == TEXT("be")) return GetOrdinalPluralCase_44(Value);
-		if (LanguageCode == TEXT("uk")) return GetOrdinalPluralCase_45(Value);
-		if (LanguageCode == TEXT("tk")) return GetOrdinalPluralCase_46(Value);
-		if (LanguageCode == TEXT("kk")) return GetOrdinalPluralCase_47(Value);
-
-		if (LanguageCode == TEXT("it") || LanguageCode == TEXT("sc") ||
-			LanguageCode == TEXT("scn") || LanguageCode == TEXT("vec"))
-			return GetOrdinalPluralCase_48(Value);
-
-		if (LanguageCode == TEXT("lij")) return GetOrdinalPluralCase_49(Value);
-		if (LanguageCode == TEXT("ka")) return GetOrdinalPluralCase_50(Value);
-		if (LanguageCode == TEXT("sq")) return GetOrdinalPluralCase_51(Value);
-		if (LanguageCode == TEXT("kw")) return GetOrdinalPluralCase_52(Value);
-		if (LanguageCode == TEXT("en")) return GetOrdinalPluralCase_53(Value);
-		if (LanguageCode == TEXT("mr")) return GetOrdinalPluralCase_54(Value);
-		if (LanguageCode == TEXT("gd")) return GetOrdinalPluralCase_55(Value);
-		if (LanguageCode == TEXT("ca")) return GetOrdinalPluralCase_56(Value);
-		if (LanguageCode == TEXT("mk")) return GetOrdinalPluralCase_57(Value);
-		if (LanguageCode == TEXT("az")) return GetOrdinalPluralCase_58(Value);
-
-		if (LanguageCode == TEXT("gu") || LanguageCode == TEXT("hi"))
-			return GetOrdinalPluralCase_59(Value);
-
-		if (LanguageCode == TEXT("as") || LanguageCode == TEXT("bn"))
-			return GetOrdinalPluralCase_60(Value);
-
-		if (LanguageCode == TEXT("or")) return GetOrdinalPluralCase_61(Value);
-		if (LanguageCode == TEXT("cy")) return GetOrdinalPluralCase_62(Value);
-
-		return EPluralCase::Other;
-	}
-
-	FString PluralCaseToString(EPluralCase Case)
-	{
-		switch (Case)
-		{
-		case EPluralCase::Zero: return TEXT("ZERO");
-		case EPluralCase::One: return TEXT("ONE");
-		case EPluralCase::Two: return TEXT("TWO");
-		case EPluralCase::Few: return TEXT("FEW");
-		case EPluralCase::Many: return TEXT("MANY");
-		case EPluralCase::Other: return TEXT("OTHER");
-		default: return TEXT("OTHER");
-		}
-	}
 }
 
 // ============================================================================
@@ -1422,26 +447,29 @@ static bool ProcessBuiltInReplacement(
 	{
 		double NumericValue = FCString::Atod(*ValueStr);
 
-		// Resolve locale to neutral culture (e.g., "en-AU" -> "en")
-		FString LangCode = LocaleCode;
-		int32 DashIdx;
-		if (LangCode.FindChar(TEXT('-'), DashIdx))
+		FCulturePtr Culture = FInternationalization::Get().GetCulture(LocaleCode);
+		if (!Culture.IsValid())
 		{
-			LangCode = LangCode.Left(DashIdx);
+			Culture = FInternationalization::Get().GetCurrentLanguage();
 		}
 
-		// Get the plural case
-		YarnPlurals::EPluralCase PluralCase;
-		if (MarkerName.Equals(PluralAttribute, ESearchCase::CaseSensitive))
-		{
-			PluralCase = YarnPlurals::GetCardinalPluralCase(LangCode, NumericValue);
-		}
-		else
-		{
-			PluralCase = YarnPlurals::GetOrdinalPluralCase(LangCode, NumericValue);
-		}
+		const ETextPluralType PluralType =
+			MarkerName.Equals(PluralAttribute, ESearchCase::CaseSensitive)
+				? ETextPluralType::Cardinal
+				: ETextPluralType::Ordinal;
 
-		FString CaseName = YarnPlurals::PluralCaseToString(PluralCase);
+		const ETextPluralForm PluralForm = Culture->GetPluralForm(NumericValue, PluralType);
+
+		FString CaseName;
+		switch (PluralForm)
+		{
+		case ETextPluralForm::Zero: CaseName = TEXT("zero"); break;
+		case ETextPluralForm::One:  CaseName = TEXT("one");  break;
+		case ETextPluralForm::Two:  CaseName = TEXT("two");  break;
+		case ETextPluralForm::Few:  CaseName = TEXT("few");  break;
+		case ETextPluralForm::Many: CaseName = TEXT("many"); break;
+		default:                    CaseName = TEXT("other"); break;
+		}
 
 		// Look up the property with the plural case name (case-insensitive)
 		FString ReplacementStr;
@@ -1571,13 +599,29 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 	TArray<FMarkupOpenTag> OpenTags;
 	int32 NextTrackingID = 0;
 
+	auto CollectChildAttrs = [&Result](const FYarnMarkupAttribute& Attr, int32 ExcludeIndex, TArray<FYarnMarkupAttribute>& OutChildAttrs, TArray<int32>& OutChildIndices)
+	{
+		for (int32 k = 0; k < Result.Attributes.Num(); k++)
+		{
+			if (k == ExcludeIndex)
+			{
+				continue;
+			}
+			const FYarnMarkupAttribute& Existing = Result.Attributes[k];
+			if (Existing.Position >= Attr.Position && Existing.Position + Existing.Length <= Attr.Position + Attr.Length)
+			{
+				FYarnMarkupAttribute Relative = Existing;
+				Relative.Position -= Attr.Position;
+				OutChildAttrs.Add(Relative);
+				OutChildIndices.Add(k);
+			}
+		}
+	};
+
 	// Applies a registered marker processor to a just-completed attribute.
 	// At close time the attribute's span is always the suffix of PlainText,
 	// so the rewrite is a splice at Attr.Position with no position fix-ups
 	// needed for attributes outside the span. Child attributes inside the
-	// span are handed to the processor span-relative (like the C# parser's
-	// childAttributes) and rebased afterwards. Returns true if the attribute
-	// was consumed by a processor and must not be added to the result.
 	auto TryRunMarkerProcessor = [&](const FYarnMarkupAttribute& Attr, bool bIsSplit) -> bool
 	{
 		if (MarkerProcessors.Num() == 0)
@@ -1593,29 +637,14 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 
 		if (bIsSplit)
 		{
-			// A split (adoption-agency) attribute covers a discontiguous span;
-			// rewriting part of it is ill-defined, so leave it as markup.
-			UE_LOG(LogYarnSpinner, Warning, TEXT("Markup: marker processor for [%s] skipped - attribute is split across misnested tags"), *Attr.Name);
 			return false;
 		}
 
 		FString ChildText = PlainText.Mid(Attr.Position, Attr.Length);
 
-		// Collect attributes fully inside the span, rebased to span-relative
-		// positions for the processor.
 		TArray<FYarnMarkupAttribute> ChildAttrs;
 		TArray<int32> ChildIndices;
-		for (int32 k = 0; k < Result.Attributes.Num(); k++)
-		{
-			const FYarnMarkupAttribute& Existing = Result.Attributes[k];
-			if (Existing.Position >= Attr.Position && Existing.Position + Existing.Length <= Attr.Position + Attr.Length)
-			{
-				FYarnMarkupAttribute Relative = Existing;
-				Relative.Position -= Attr.Position;
-				ChildAttrs.Add(Relative);
-				ChildIndices.Add(k);
-			}
-		}
+		CollectChildAttrs(Attr, INDEX_NONE, ChildAttrs, ChildIndices);
 
 		FYarnMarkupReplacementResult ProcResult = IYarnMarkupProcessor::Execute_ProcessMarkup(
 			Found->GetObject(), Attr, ChildText, ChildAttrs, LocaleCode);
@@ -2057,6 +1086,79 @@ FYarnMarkupParseResult UYarnMarkupLibrary::ParseMarkupFull(const FString& Text, 
 			else
 			{
 				Result.Attributes[j].Properties.Remove(TEXT("_splitID"));
+			}
+		}
+	}
+
+	// ========================================================================
+	// ========================================================================
+	if (MarkerProcessors.Num() > 0)
+	{
+		int32 RewritesRemaining = Result.Attributes.Num() + 8;
+
+		bool bDidRewrite = true;
+		while (bDidRewrite && RewritesRemaining-- > 0)
+		{
+			bDidRewrite = false;
+
+			for (int32 j = 0; j < Result.Attributes.Num(); j++)
+			{
+				const FYarnMarkupAttribute Attr = Result.Attributes[j];
+
+				const TScriptInterface<IYarnMarkupProcessor>* Found = MarkerProcessors.Find(Attr.Name);
+				if (!Found || !Found->GetObject())
+				{
+					continue;
+				}
+
+				FString ChildText = PlainText.Mid(Attr.Position, Attr.Length);
+
+				TArray<FYarnMarkupAttribute> ChildAttrs;
+				TArray<int32> ChildIndices;
+				CollectChildAttrs(Attr, j, ChildAttrs, ChildIndices);
+
+				FYarnMarkupReplacementResult ProcResult = IYarnMarkupProcessor::Execute_ProcessMarkup(
+					Found->GetObject(), Attr, ChildText, ChildAttrs, LocaleCode);
+
+				for (const FString& Diagnostic : ProcResult.Diagnostics)
+				{
+					UE_LOG(LogYarnSpinner, Warning, TEXT("Markup: [%s] processor: %s"), *Attr.Name, *Diagnostic);
+				}
+
+				const int32 SpanStart = Attr.Position;
+				const int32 SpanEnd = Attr.Position + Attr.Length;
+				const int32 Delta = ChildText.Len() - Attr.Length;
+
+				PlainText = PlainText.Left(SpanStart) + ChildText + PlainText.Mid(SpanEnd);
+
+				TArray<int32> ToRemove = ChildIndices;
+				ToRemove.Add(j);
+				ToRemove.Sort();
+				for (int32 r = ToRemove.Num() - 1; r >= 0; r--)
+				{
+					Result.Attributes.RemoveAt(ToRemove[r]);
+				}
+
+				for (FYarnMarkupAttribute& Other : Result.Attributes)
+				{
+					if (Other.Position >= SpanEnd)
+					{
+						Other.Position += Delta;
+					}
+					else if (Other.Position <= SpanStart && Other.Position + Other.Length >= SpanEnd)
+					{
+						Other.Length += Delta;
+					}
+				}
+
+				for (FYarnMarkupAttribute& Relative : ChildAttrs)
+				{
+					Relative.Position += SpanStart;
+					Result.Attributes.Add(Relative);
+				}
+
+				bDidRewrite = true;
+				break;
 			}
 		}
 	}

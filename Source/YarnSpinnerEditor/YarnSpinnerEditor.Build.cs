@@ -50,6 +50,8 @@ public class YarnSpinnerEditor : ModuleRules
 				"SlateCore",
 				"UnrealEd",
 				"AssetTools",
+				"AssetDefinition",
+				"ContentBrowser",
 				"EditorFramework",
 				"Projects",
 				"InputCore",
@@ -57,6 +59,10 @@ public class YarnSpinnerEditor : ModuleRules
 				"JsonUtilities",
 				"ToolMenus",
 				"DirectoryWatcher",
+				"AssetRegistry",
+				"DeveloperSettings",
+				"PropertyEditor",
+				"BlueprintGraph",
 			}
 		);
 

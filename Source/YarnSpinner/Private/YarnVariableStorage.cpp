@@ -102,6 +102,14 @@ bool UYarnInMemoryVariableStorage::TryGetValue_Implementation(const FString& Var
 		return true;
 	}
 
+	if (IYarnSmartVariableEvaluator* Evaluator = GetActiveSmartVariableEvaluator())
+	{
+		if (Evaluator->TryGetSmartVariable(VariableName, OutValue))
+		{
+			return true;
+		}
+	}
+
 	// if not found, check initial values from the yarn project
 	if (YarnProject.IsValid())
 	{
@@ -126,10 +134,22 @@ bool UYarnInMemoryVariableStorage::Contains_Implementation(const FString& Variab
 		return true;
 	}
 
+	FYarnValue TempValue;
+	if (TryGetSmartValue(VariableName, TempValue))
+	{
+		return true;
+	}
+	if (IYarnSmartVariableEvaluator* Evaluator = GetActiveSmartVariableEvaluator())
+	{
+		if (Evaluator->TryGetSmartVariable(VariableName, TempValue))
+		{
+			return true;
+		}
+	}
+
 	// check initial values from the yarn project
 	if (YarnProject.IsValid())
 	{
-		FYarnValue TempValue;
 		return YarnProject->TryGetInitialValue(VariableName, TempValue);
 	}
 
@@ -151,9 +171,11 @@ IYarnSmartVariableEvaluator* UYarnInMemoryVariableStorage::GetSmartVariableEvalu
 	return CompiledSmartVariableEvaluator;
 }
 
-void UYarnInMemoryVariableStorage::SetSmartVariableEvaluator(IYarnSmartVariableEvaluator* Evaluator)
+void UYarnInMemoryVariableStorage::SetSmartVariableEvaluator(IYarnSmartVariableEvaluator* Evaluator, UObject* EvaluatorOwner)
 {
 	CompiledSmartVariableEvaluator = Evaluator;
+	CompiledSmartVariableEvaluatorOwner = EvaluatorOwner;
+	bEvaluatorOwnerProvided = EvaluatorOwner != nullptr;
 }
 
 void UYarnInMemoryVariableStorage::GetAllVariables(
@@ -202,17 +224,17 @@ void UYarnInMemoryVariableStorage::SetAllVariables(
 
 	for (const TPair<FString, float>& Pair : Floats)
 	{
-		SetNumber_Implementation(Pair.Key, Pair.Value);
+		IYarnVariableStorage::Execute_SetNumber(this, Pair.Key, Pair.Value);
 	}
 
 	for (const TPair<FString, FString>& Pair : Strings)
 	{
-		SetString_Implementation(Pair.Key, Pair.Value);
+		IYarnVariableStorage::Execute_SetString(this, Pair.Key, Pair.Value);
 	}
 
 	for (const TPair<FString, bool>& Pair : Bools)
 	{
-		SetBool_Implementation(Pair.Key, Pair.Value);
+		IYarnVariableStorage::Execute_SetBool(this, Pair.Key, Pair.Value);
 	}
 }
 
@@ -264,7 +286,7 @@ void UYarnInMemoryVariableStorage::NotifyVariableChanged(const FString& Variable
 			TArray<FStringListener> ListenersCopy = StringListeners;
 			for (const FStringListener& Listener : ListenersCopy)
 			{
-				if (Listener.VariableName.Equals(VariableName, ESearchCase::IgnoreCase))
+				if (Listener.VariableName.Equals(VariableName, ESearchCase::CaseSensitive))
 				{
 					Listener.Callback.ExecuteIfBound(VariableName, NewValue.GetStringValue());
 				}
@@ -278,7 +300,7 @@ void UYarnInMemoryVariableStorage::NotifyVariableChanged(const FString& Variable
 			TArray<FNumberListener> ListenersCopy = NumberListeners;
 			for (const FNumberListener& Listener : ListenersCopy)
 			{
-				if (Listener.VariableName.Equals(VariableName, ESearchCase::IgnoreCase))
+				if (Listener.VariableName.Equals(VariableName, ESearchCase::CaseSensitive))
 				{
 					Listener.Callback.ExecuteIfBound(VariableName, NewValue.GetNumberValue());
 				}
@@ -292,7 +314,7 @@ void UYarnInMemoryVariableStorage::NotifyVariableChanged(const FString& Variable
 			TArray<FBoolListener> ListenersCopy = BoolListeners;
 			for (const FBoolListener& Listener : ListenersCopy)
 			{
-				if (Listener.VariableName.Equals(VariableName, ESearchCase::IgnoreCase))
+				if (Listener.VariableName.Equals(VariableName, ESearchCase::CaseSensitive))
 				{
 					Listener.Callback.ExecuteIfBound(VariableName, NewValue.GetBoolValue());
 				}

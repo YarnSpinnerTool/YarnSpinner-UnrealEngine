@@ -1,0 +1,2140 @@
+// ============================================================================
+//
+//  Yarn Spinner for Unreal Engine
+//
+//  Copyright (c) Yarn Spinner Pty. Ltd. All Rights Reserved.
+//
+//  Yarn Spinner is a trademark of Secret Lab Pty. Ltd., used under license.
+//
+//  This code is subject to the terms and conditions of the license found in
+//  the LICENSE.md file in the root of this repository.
+//
+//  For help, support, and more information, visit:
+//    https://yarnspinner.dev
+//    https://docs.yarnspinner.dev
+//
+// ============================================================================
+
+#include "YarnDialogueInstance.h"
+#include "YarnDialogueRunner.h"
+#include "YarnDialoguePresenter.h"
+#include "YarnLocalization.h"
+#include "YarnSmartVariables.h"
+#include "YarnSpinnerModule.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Misc/ScopeExit.h"
+#include "TimerManager.h"
+#include <cmath>
+
+namespace
+{
+	// Build a fresh per-content cancellation source linked to the dialogue
+	// source. Called whenever a new line or options block starts: the previous
+	// content source becomes garbage (the UPROPERTY anchor moves to the new
+	// one) and any wrappers that built linked children off it observe its
+	// abandonment naturally.
+	// Previous is the source being replaced. We retire it explicitly so it
+	// stops holding cancel/hurry subscriptions on the dialogue source -
+	// otherwise those pile up (one pair per line) until GC.
+	UYarnCancellationTokenSource* MakeLinkedContentSource(UObject* Outer, UYarnCancellationTokenSource* DialogueSource, UYarnCancellationTokenSource* Previous)
+	{
+		if (Previous)
+		{
+			Previous->UnlinkFromParents();
+		}
+		TArray<FYarnLineCancellationToken> Parents;
+		if (DialogueSource)
+		{
+			Parents.Add(DialogueSource->GetToken());
+		}
+		return UYarnCancellationTokenSource::CreateLinkedTokenSource(Outer, Parents);
+	}
+}
+
+void UYarnDialogueInstance::Initialize(UYarnDialogueRunner* InOwner)
+{
+	Owner = InOwner;
+}
+
+UWorld* UYarnDialogueInstance::GetOwnerWorld() const
+{
+	return Owner.IsValid() ? Owner->GetWorld() : nullptr;
+}
+
+void UYarnDialogueInstance::SetupVirtualMachine()
+{
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: No Yarn Project set"));
+		return;
+	}
+
+	VirtualMachine.SetProgram(Owner->YarnProject->Program);
+	VirtualMachine.VariableStorage = Owner->VariableStorage;
+
+	VirtualMachine.LineHandler.BindUObject(this, &UYarnDialogueInstance::HandleLine);
+	VirtualMachine.OptionsHandler.BindUObject(this, &UYarnDialogueInstance::HandleOptions);
+	VirtualMachine.CommandHandler.BindUObject(this, &UYarnDialogueInstance::HandleCommand);
+	VirtualMachine.NodeStartHandler.BindUObject(this, &UYarnDialogueInstance::HandleNodeStart);
+	VirtualMachine.NodeCompleteHandler.BindUObject(this, &UYarnDialogueInstance::HandleNodeComplete);
+	VirtualMachine.DialogueCompleteHandler.BindUObject(this, &UYarnDialogueInstance::HandleDialogueComplete);
+
+	VirtualMachine.CallFunctionHandler.BindUObject(this, &UYarnDialogueInstance::CallFunction);
+	VirtualMachine.FunctionErroredHandler.BindUObject(this, &UYarnDialogueInstance::TakeFunctionError);
+	VirtualMachine.FunctionExistsHandler.BindUObject(this, &UYarnDialogueInstance::FunctionExists);
+	VirtualMachine.FunctionParamCountHandler.BindUObject(this, &UYarnDialogueInstance::GetFunctionParameterCount);
+	VirtualMachine.SelectSaliencyCandidateHandler.BindUObject(this, &UYarnDialogueInstance::HandleVMSelectSaliencyCandidate);
+	VirtualMachine.ContentWasSelectedHandler.BindUObject(this, &UYarnDialogueInstance::HandleContentWasSelected);
+	VirtualMachine.PrepareForLinesHandler.BindUObject(this, &UYarnDialogueInstance::HandlePrepareForLines);
+}
+
+void UYarnDialogueInstance::ResetForNewProject()
+{
+	ActiveLinePresenterCount = 0;
+	CurrentLocalizedOptions.Options.Empty();
+	PendingSelectedOptionIndex = -1;
+	SaliencyCandidates.Empty();
+
+	// Switching projects effectively ends any current dialogue. Drop the
+	// dialogue source (creating a fresh one ready for the next StartDialogue)
+	// and clear the per-content sources so the next HandleLine/HandleOptions
+	// makes fresh ones linked to the new dialogue source.
+	DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+	CancellationTokenSource = nullptr;
+	OptionsCancellationTokenSource = nullptr;
+}
+
+void UYarnDialogueInstance::StartDialogue(const FString& NodeName)
+{
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: Cannot start dialogue - no Yarn Project set"));
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Starting dialogue at node '%s'"), *NodeName);
+
+	// Debug: enumerating every node is O(project) and can hitch a frame
+	// on StartDialogue in large projects — verbose only.
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: YarnProject has %d nodes"), RunnerOwner->YarnProject->Program.Nodes.Num());
+		for (const auto& Pair : RunnerOwner->YarnProject->Program.Nodes)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("  - Node '%s' has %d instructions"), *Pair.Key, Pair.Value.Instructions.Num());
+		}
+	}
+
+	if (!RunnerOwner->YarnProject->HasNode(NodeName))
+	{
+		UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: Cannot start dialogue - node '%s' not found"), *NodeName);
+		return;
+	}
+
+	const FYarnNode* Node = RunnerOwner->YarnProject->Program.GetNode(NodeName);
+	if (Node)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Node '%s' found with %d instructions"), *NodeName, Node->Instructions.Num());
+	}
+
+	// Each conversation gets a fresh dialogue-level cancellation source.
+	// The previous one may have been cancelled by a previous StopDialogue;
+	// we don't want a brand-new dialogue to start out cancelled. Per-content
+	// sources are nulled out and rebuilt on the first HandleLine /
+	// HandleOptions so they link to the new dialogue source.
+	DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+	CancellationTokenSource = nullptr;
+	OptionsCancellationTokenSource = nullptr;
+
+	// Events fire before presenters are notified
+	RunnerOwner->OnDialogueStart.Broadcast();
+
+	// Notify presenters that dialogue is starting
+	// Copy the array to prevent issues if a presenter modifies the list during iteration
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Notifying %d presenters"), RunnerOwner->DialoguePresenters.Num());
+	TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnDialogueStarted();
+		}
+	}
+
+	VirtualMachine.VariableStorage = RunnerOwner->VariableStorage;
+
+	CreateSaliencyStrategy();
+
+	// Set the node and start
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Setting node and starting VM"));
+	if (VirtualMachine.SetNode(NodeName))
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Node set, calling Continue()"));
+		VirtualMachine.Continue();
+	}
+	else
+	{
+		UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: Failed to set node '%s' on VM"), *NodeName);
+	}
+}
+
+void UYarnDialogueInstance::StopDialogue()
+{
+	// Clear any pending wait timer so it doesn't fire after dialogue stops
+	if (UWorld* World = GetOwnerWorld())
+	{
+		World->GetTimerManager().ClearTimer(WaitTimerHandle);
+	}
+
+	// A pending blocking command dies with the dialogue
+	bBlockingCommandPending = false;
+
+	ActiveLinePresenterCount = 0;
+	PendingSelectedOptionIndex = -1;
+	CurrentLocalizedOptions.Options.Empty();
+
+	// Cancel the dialogue source. Linked per-line and per-options sources
+	// see this and cascade automatically, so we don't need to cancel them
+	// individually. Anyone holding a token observing those — presenters,
+	// wrapper-built linked sources, markup handlers — sees cancellation.
+	if (DialogueCancellationSource)
+	{
+		DialogueCancellationSource->Cancel();
+	}
+
+	// Stop() will trigger DialogueCompleteHandler which notifies presenters
+	VirtualMachine.Stop();
+}
+
+bool UYarnDialogueInstance::IsDialogueRunning() const
+{
+	return VirtualMachine.IsActive();
+}
+
+void UYarnDialogueInstance::Continue()
+{
+	if (!IsDialogueRunning())
+	{
+		UE_LOG(LogYarnSpinner, Verbose, TEXT("YarnDialogueRunner: Continue() ignored - no dialogue running"));
+		return;
+	}
+
+	// Check if we have a pending option selection (from bRunSelectedOptionAsLine)
+	if (PendingSelectedOptionIndex >= 0)
+	{
+		int32 OptionIndex = PendingSelectedOptionIndex;
+		PendingSelectedOptionIndex = -1;
+
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Continue() completing pending option selection: %d"), OptionIndex);
+
+		CurrentLocalizedOptions.Options.Empty();
+
+		// Complete the pending option selection
+		VirtualMachine.SetSelectedOption(OptionIndex);
+	}
+
+	VirtualMachine.Continue();
+}
+
+void UYarnDialogueInstance::RequestHurryUp()
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	// Set hurry-up on the per-content source. Tokens observing it now read
+	// IsHurryUpRequested true; linked child sources (wrapper presenters etc)
+	// see it via the cascade.
+	if (CancellationTokenSource)
+	{
+		CancellationTokenSource->RequestHurryUp();
+	}
+
+	// Copy the array to prevent issues if a presenter modifies the list during iteration
+	TArray<UYarnDialoguePresenter*> PresentersCopy = Owner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnHurryUpRequested();
+		}
+	}
+}
+
+void UYarnDialogueInstance::RequestNextLine()
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	// Cancel the per-content source. Tokens observing it (and tokens
+	// observing any wrapper-built linked children of it) now read
+	// IsCancellationRequested true. Presenters wrap up and signal back.
+	if (CancellationTokenSource)
+	{
+		CancellationTokenSource->Cancel();
+	}
+
+	// Copy the array to prevent issues if a presenter modifies the list during iteration
+	TArray<UYarnDialoguePresenter*> PresentersCopy = Owner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnNextLineRequested();
+		}
+	}
+}
+
+void UYarnDialogueInstance::RequestHurryUpOption()
+{
+	if (!OptionsCancellationTokenSource || !Owner.IsValid())
+	{
+		return;
+	}
+
+	OptionsCancellationTokenSource->RequestHurryUp();
+
+	if (Owner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: RequestHurryUpOption called"));
+	}
+
+	// Copy the array to prevent issues if a presenter modifies the list during iteration
+	TArray<UYarnDialoguePresenter*> PresentersCopy = Owner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnOptionsHurryUpRequested();
+		}
+	}
+}
+
+void UYarnDialogueInstance::SelectOption(int32 OptionIndex)
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	UE_LOG(LogYarnSpinner, Verbose, TEXT("YarnDialogueRunner: SelectOption(%d) called, bRunSelectedOptionAsLine=%s, StoredOptions=%d"),
+		OptionIndex, RunnerOwner->bRunSelectedOptionAsLine ? TEXT("true") : TEXT("false"), CurrentLocalizedOptions.Options.Num());
+
+	// Run the selected option's text as a line before continuing, so it gets full presentation
+	if (RunnerOwner->bRunSelectedOptionAsLine && OptionIndex >= 0 && OptionIndex < CurrentLocalizedOptions.Options.Num())
+	{
+		const FYarnOption& SelectedOption = CurrentLocalizedOptions.Options[OptionIndex];
+
+		UE_LOG(LogYarnSpinner, Verbose, TEXT("YarnDialogueRunner: Running selected option as line: LineID='%s' Text='%s'"),
+			*SelectedOption.Line.RawLine.LineID, *SelectedOption.Line.Text.ToString());
+
+		// Store the pending option; selection completes when the line presentation finishes
+		PendingSelectedOptionIndex = OptionIndex;
+
+		// Build a fresh line-level cancellation source for replaying the
+		// option as a line. Same shape as HandleLine: linked to the dialogue
+		// source, all presenters share token and callback.
+		CancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, CancellationTokenSource);
+		const FYarnLineCancellationToken LineToken = CancellationTokenSource->GetToken();
+		FOnYarnLineFinished LineCallback;
+		LineCallback.BindDynamic(this, &UYarnDialogueInstance::HandlePresenterLineFinished);
+
+		ActiveLinePresenterCount = 0;
+		TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+		for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+		{
+			if (Presenter)
+			{
+				++ActiveLinePresenterCount;
+			}
+		}
+
+		// When presenters complete, the bound callback lands in
+		// HandlePresenterLineFinished, which calls Continue() when the
+		// count reaches zero. That in turn picks up PendingSelectedOptionIndex.
+		for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+		{
+			if (Presenter)
+			{
+				Presenter->Internal_RunLine(SelectedOption.Line, true, LineToken, LineCallback);
+			}
+		}
+
+		// Don't call Continue() here - wait for presenters to finish
+		return;
+	}
+
+	CurrentLocalizedOptions.Options.Empty();
+
+	VirtualMachine.SetSelectedOption(OptionIndex);
+	VirtualMachine.Continue();
+}
+
+FString UYarnDialogueInstance::GetCurrentNodeName() const
+{
+	return VirtualMachine.GetCurrentNodeName();
+}
+
+void UYarnDialogueInstance::HandleLine(const FYarnLine& Line)
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: HandleLine called with LineID='%s'"), *Line.LineID);
+
+	FYarnLocalizedLine LocalizedLine = GetLocalizedLine(Line);
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Localised line: Character='%s' Text='%s'"),
+		*LocalizedLine.CharacterName, *LocalizedLine.Text.ToString());
+
+	// Fresh per-line source linked to the dialogue source. The previous
+	// line's source (if any) loses its UPROPERTY anchor here and is eligible
+	// for GC. Presenters holding stale tokens from prior lines will see a
+	// dead source, which reports "not cancelled" — fine, because they
+	// shouldn't be checking after their line finished anyway.
+	CancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, CancellationTokenSource);
+
+	// Build the token + callback the presenters will receive. Every
+	// presenter on this line gets the *same* token (they're all observing
+	// the same content source) and the *same* callback (we'll get one call
+	// per presenter, and the count tells us when everyone is done).
+	const FYarnLineCancellationToken LineToken = CancellationTokenSource->GetToken();
+	FOnYarnLineFinished LineCallback;
+	LineCallback.BindDynamic(this, &UYarnDialogueInstance::HandlePresenterLineFinished);
+
+	// Count first, dispatch second. A presenter whose RunLine completes
+	// synchronously (e.g. a particle-trigger presenter) would otherwise
+	// decrement the count to zero before the rest of the loop has even
+	// dispatched, and we'd Continue too early.
+	ActiveLinePresenterCount = 0;
+
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Sending to %d presenters"), RunnerOwner->DialoguePresenters.Num());
+	TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			ActiveLinePresenterCount++;
+		}
+	}
+
+	UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: %d active presenters for this line"), ActiveLinePresenterCount);
+
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Calling Internal_RunLine on presenter %s"), *Presenter->GetName());
+			Presenter->Internal_RunLine(LocalizedLine, true, LineToken, LineCallback);
+		}
+	}
+
+	if (ActiveLinePresenterCount == 0)
+	{
+		VirtualMachine.SignalContentComplete();
+	}
+}
+
+void UYarnDialogueInstance::HandlePresenterLineFinished(EYarnLineCompletionRequest Request)
+{
+	if (!IsDialogueRunning() || ActiveLinePresenterCount <= 0)
+	{
+		UE_LOG(LogYarnSpinner, Verbose, TEXT("YarnDialogueRunner: Ignoring stale presenter line completion"));
+		return;
+	}
+
+	--ActiveLinePresenterCount;
+
+	if (Owner.IsValid() && Owner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Presenter line finished (request=%d, %d remaining)"),
+			(int32)Request, ActiveLinePresenterCount);
+	}
+
+	// Honour an EndLine request by cancelling the content source. Siblings
+	// will see their tokens flip and wrap up; they'll call back into us as
+	// they do, which decrements the count the rest of the way to zero.
+	// Cancel is idempotent, so receiving EndLine from several presenters in
+	// a row does no extra work after the first.
+	if (Request == EYarnLineCompletionRequest::EndLine && CancellationTokenSource)
+	{
+		CancellationTokenSource->Cancel();
+	}
+
+	if (ActiveLinePresenterCount <= 0)
+	{
+		ActiveLinePresenterCount = 0;
+
+		if (VirtualMachine.GetExecutionState() == EYarnExecutionState::DeliveringContent)
+		{
+			VirtualMachine.SignalContentComplete();
+		}
+		else
+		{
+			Continue();
+		}
+	}
+}
+
+void UYarnDialogueInstance::HandlePresenterOptionSelected(int32 OptionIndex)
+{
+	// The player has chosen, so any other presenters still showing options
+	// are moot. Cancel the options source to tell them to clean up. A
+	// well-behaved option presenter treats a cancelled token as "stop
+	// showing options" and does not itself report a selection, so this
+	// won't cause a second selection to come back.
+	if (OptionsCancellationTokenSource)
+	{
+		OptionsCancellationTokenSource->Cancel();
+	}
+
+	SelectOption(OptionIndex);
+}
+
+void UYarnDialogueInstance::HandleOptions(const FYarnOptionSet& Options)
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Showing %d options"), Options.Options.Num());
+	}
+
+	int32 ActiveOptionsPresenterCount = 0;
+	for (UYarnDialoguePresenter* Presenter : RunnerOwner->DialoguePresenters)
+	{
+		if (Presenter && Presenter->CanHandleOptions())
+		{
+			ActiveOptionsPresenterCount++;
+		}
+	}
+
+	if (ActiveOptionsPresenterCount == 0)
+	{
+		if (RunnerOwner->bAllowOptionFallthrough)
+		{
+			UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: %d option(s) to show but no dialogue presenters are registered - continuing without a selection"), Options.Options.Num());
+			SelectOption(YarnNoOptionSelected);
+		}
+		else
+		{
+			UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: %d option(s) to show but no dialogue presenters are registered - stopping dialogue"), Options.Options.Num());
+			StopDialogue();
+		}
+		return;
+	}
+
+	// Fresh per-options source linked to the dialogue source. Same lifecycle
+	// rules as the per-line source above.
+	OptionsCancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, OptionsCancellationTokenSource);
+
+	// Localise all options and store for potential use by bRunSelectedOptionAsLine
+	CurrentLocalizedOptions.Options.Empty();
+	for (const FYarnOption& Option : Options.Options)
+	{
+		FYarnOption LocalizedOption = Option;
+		LocalizedOption.Line = GetLocalizedLine(Option.Line.RawLine);
+		CurrentLocalizedOptions.Options.Add(LocalizedOption);
+	}
+
+	// Token and callback for the options block. The same pair goes to every
+	// presenter; the first one whose user picks an option drives the call
+	// back, and SelectOption picks up the rest.
+	const FYarnLineCancellationToken OptionsToken = OptionsCancellationTokenSource->GetToken();
+	FOnYarnOptionSelected OptionsCallback;
+	OptionsCallback.BindDynamic(this, &UYarnDialogueInstance::HandlePresenterOptionSelected);
+
+	// Send to all presenters - copy array to prevent issues if a presenter modifies the list during iteration
+	TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->Internal_RunOptions(CurrentLocalizedOptions, OptionsToken, OptionsCallback);
+		}
+	}
+}
+
+void UYarnDialogueInstance::HandleCommand(const FYarnCommand& Command)
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Command '%s'"), *Command.CommandText);
+	}
+
+	if (Command.CommandName == TEXT("wait"))
+	{
+		// Parse the duration parameter (default 1 second if not specified)
+		float Duration = 1.0f;
+		if (Command.Parameters.Num() > 0)
+		{
+			Duration = FCString::Atof(*Command.Parameters[0]);
+		}
+
+		if (RunnerOwner->bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Wait command for %.2f seconds"), Duration);
+		}
+
+		// Use a timer to delay continuation
+		if (UWorld* World = GetOwnerWorld())
+		{
+			World->GetTimerManager().ClearTimer(WaitTimerHandle);
+			World->GetTimerManager().SetTimer(
+				WaitTimerHandle,
+				this,
+				&UYarnDialogueInstance::OnWaitComplete,
+				Duration,
+				false
+			);
+		}
+		else
+		{
+			// No world available, just continue immediately
+			VirtualMachine.Continue();
+		}
+		return;
+	}
+
+	if (Command.CommandName == TEXT("stop"))
+	{
+		if (RunnerOwner->bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Stop command - ending dialogue"));
+		}
+		StopDialogue();
+		return;
+	}
+
+	// Check for registered handler
+	if (TFunction<void(const TArray<FString>&)>* Handler = CommandHandlers.Find(Command.CommandName))
+	{
+		const bool bIsBlocking = BlockingCommandNames.Contains(Command.CommandName);
+		if (bIsBlocking)
+		{
+			// Blocking command: dialogue stays parked (the VM is already in
+			// WaitingForContinue) until CompleteBlockingCommand() is called.
+			bBlockingCommandPending = true;
+		}
+
+		(*Handler)(Command.Parameters);
+
+		if (bIsBlocking)
+		{
+			return;
+		}
+
+		ContinueDeferred();
+		return;
+	}
+
+	bool bRequestedBlocking = false;
+	if (TryDispatchToBlueprintHandler(Command, bRequestedBlocking)
+		|| TryDispatchToWorldActor(Command, bRequestedBlocking))
+	{
+		if (bRequestedBlocking)
+		{
+			bBlockingCommandPending = true;
+			return;
+		}
+
+		ContinueDeferred();
+		return;
+	}
+
+	// Unhandled command
+	UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: Unhandled command '%s'"), *Command.CommandName);
+
+	RunnerOwner->OnUnhandledCommand.Broadcast(Command.CommandText);
+
+	if (RunnerOwner->bContinueOnUnhandledCommand)
+	{
+		ContinueDeferred();
+	}
+}
+
+void UYarnDialogueInstance::HandleNodeStart(const FString& NodeName)
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Node start '%s'"), *NodeName);
+	}
+
+	// Visit tracking is handled in VM's ReturnFromNode (on node completion), not here on start.
+
+	// Events fire before presenters are notified
+	RunnerOwner->OnNodeStart.Broadcast(NodeName);
+
+	// Copy the array to prevent issues if a presenter modifies the list during iteration
+	TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnNodeEnter(NodeName);
+		}
+	}
+}
+
+void UYarnDialogueInstance::HandleNodeComplete(const FString& NodeName)
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Node complete '%s'"), *NodeName);
+	}
+
+	// Events fire before presenters are notified
+	RunnerOwner->OnNodeComplete.Broadcast(NodeName);
+
+	// Copy the array to prevent issues if a presenter modifies the list during iteration
+	TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnNodeExit(NodeName);
+		}
+	}
+}
+
+void UYarnDialogueInstance::HandleDialogueComplete()
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Dialogue complete"));
+	}
+
+	// For DialogueComplete, presenters are notified first, then the event fires.
+	// This is the opposite order from NodeStart/NodeComplete/DialogueStart.
+	TArray<UYarnDialoguePresenter*> PresentersCopy = RunnerOwner->DialoguePresenters;
+	for (UYarnDialoguePresenter* Presenter : PresentersCopy)
+	{
+		if (Presenter)
+		{
+			Presenter->OnDialogueComplete();
+		}
+	}
+
+	// Then fire the event
+	RunnerOwner->OnDialogueComplete.Broadcast();
+}
+
+bool UYarnDialogueInstance::TryDispatchToBlueprintHandler(const FYarnCommand& Command, bool& bOutRequestedBlocking)
+{
+	if (!Owner.IsValid())
+	{
+		return false;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	for (UObject* HandlerObject : RunnerOwner->CommandHandlerObjects)
+	{
+		if (!HandlerObject)
+		{
+			continue;
+		}
+
+		// Look for a function with the same name as the command
+		UFunction* Function = HandlerObject->FindFunction(FName(*Command.CommandName));
+		if (!Function)
+		{
+			continue;
+		}
+
+		if (RunnerOwner->bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Found Blueprint handler '%s' on '%s'"),
+				*Command.CommandName, *HandlerObject->GetName());
+		}
+
+		InvokeCommandFunction(HandlerObject, Function, Command.Parameters, bOutRequestedBlocking);
+		return true;
+	}
+
+	return false;
+}
+
+bool UYarnDialogueInstance::TryDispatchToWorldActor(const FYarnCommand& Command, bool& bOutRequestedBlocking)
+{
+	if (Command.Parameters.Num() == 0)
+	{
+		return false;
+	}
+
+	UWorld* World = GetOwnerWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	const bool bVerboseLogging = Owner.IsValid() && Owner->bVerboseLogging;
+
+	const FString& TargetName = Command.Parameters[0];
+	const FName TargetFName(*TargetName);
+
+	AActor* TargetActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (Actor->GetFName() == TargetFName)
+		{
+			TargetActor = Actor;
+			break;
+		}
+#if WITH_EDITOR
+		if (Actor->GetActorNameOrLabel().Equals(TargetName, ESearchCase::IgnoreCase))
+		{
+			TargetActor = Actor;
+			break;
+		}
+#endif
+	}
+
+	if (!TargetActor)
+	{
+		return false;
+	}
+
+	const FName FunctionFName(*Command.CommandName);
+
+	TArray<FString> Args(Command.Parameters);
+	Args.RemoveAt(0);
+
+	if (UFunction* Function = TargetActor->FindFunction(FunctionFName))
+	{
+		if (bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Dispatching command '%s' to actor '%s'"),
+				*Command.CommandName, *TargetActor->GetName());
+		}
+		InvokeCommandFunction(TargetActor, Function, Args, bOutRequestedBlocking);
+		return true;
+	}
+
+	for (UActorComponent* Component : TargetActor->GetComponents())
+	{
+		if (!Component)
+		{
+			continue;
+		}
+		if (UFunction* Function = Component->FindFunction(FunctionFName))
+		{
+			if (bVerboseLogging)
+			{
+				UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Dispatching command '%s' to component '%s' on actor '%s'"),
+					*Command.CommandName, *Component->GetName(), *TargetActor->GetName());
+			}
+			InvokeCommandFunction(Component, Function, Args, bOutRequestedBlocking);
+			return true;
+		}
+	}
+
+	UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: Found actor '%s' for command '%s' but neither it nor its components have a function with that name"),
+		*TargetActor->GetName(), *Command.CommandName);
+	return false;
+}
+
+void UYarnDialogueInstance::InvokeCommandFunction(UObject* Target, UFunction* Function, const TArray<FString>& Args, bool& bOutRequestedBlocking)
+{
+	bOutRequestedBlocking = false;
+
+	const bool bVerboseLogging = Owner.IsValid() && Owner->bVerboseLogging;
+
+	// Allocate parameter buffer on the stack
+	uint8* ParamBuffer = nullptr;
+	if (Function->ParmsSize > 0)
+	{
+		ParamBuffer = static_cast<uint8*>(FMemory_Alloca(Function->ParmsSize));
+		FMemory::Memzero(ParamBuffer, Function->ParmsSize);
+
+		// Initialize all parameters with their default values
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			if (!It->HasAnyPropertyFlags(CPF_ZeroConstructor))
+			{
+				It->InitializeValue_InContainer(ParamBuffer);
+			}
+		}
+
+		// Fill in parameters from command arguments
+		int32 ParamIndex = 0;
+		for (TFieldIterator<FProperty> It(Function); It && (It->PropertyFlags & (CPF_Parm | CPF_ReturnParm)) == CPF_Parm; ++It, ++ParamIndex)
+		{
+			if (ParamIndex < Args.Num())
+			{
+				const FString& ArgString = Args[ParamIndex];
+
+				// ImportText converts the string to the appropriate property type
+				// This handles FString, float, int, bool, FVector, FRotator, etc.
+				const TCHAR* Result = It->ImportText_InContainer(*ArgString, ParamBuffer, Target, PPF_None);
+
+				if (!Result && bVerboseLogging)
+				{
+					UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: Failed to convert parameter %d ('%s') for '%s'"),
+						ParamIndex, *ArgString, *Function->GetName());
+				}
+			}
+		}
+	}
+
+	Target->ProcessEvent(Function, ParamBuffer);
+
+	if (ParamBuffer)
+	{
+		if (const FBoolProperty* ReturnProperty = CastField<FBoolProperty>(Function->GetReturnProperty()))
+		{
+			bOutRequestedBlocking = ReturnProperty->GetPropertyValue_InContainer(ParamBuffer);
+		}
+
+		// Clean up dynamically initialized parameter memory
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			It->DestroyValue_InContainer(ParamBuffer);
+		}
+	}
+}
+
+void UYarnDialogueInstance::ContinueDeferred()
+{
+	if (UWorld* World = GetOwnerWorld())
+	{
+		TWeakObjectPtr<UYarnDialogueInstance> WeakThis(this);
+		World->GetTimerManager().SetTimerForNextTick([WeakThis]()
+		{
+			if (WeakThis.IsValid() && WeakThis->IsDialogueRunning())
+			{
+				WeakThis->VirtualMachine.Continue();
+			}
+		});
+	}
+	else
+	{
+		VirtualMachine.Continue();
+	}
+}
+
+void UYarnDialogueInstance::AddCommandHandler(const FString& CommandName, TFunction<void(const TArray<FString>&)> Handler)
+{
+	WarnIfReservedCommandName(CommandName);
+	CommandHandlers.Add(CommandName, Handler);
+}
+
+void UYarnDialogueInstance::WarnIfReservedCommandName(const FString& CommandName) const
+{
+	if (CommandName == TEXT("wait") || CommandName == TEXT("stop"))
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: '%s' is a built-in command and always handled by the runner - the registered handler will never fire"), *CommandName);
+	}
+}
+
+void UYarnDialogueInstance::RemoveCommandHandler(const FString& CommandName)
+{
+	CommandHandlers.Remove(CommandName);
+	BlockingCommandNames.Remove(CommandName);
+}
+
+void UYarnDialogueInstance::AddBlockingCommandHandler(const FString& CommandName, TFunction<void(const TArray<FString>&)> Handler)
+{
+	WarnIfReservedCommandName(CommandName);
+	CommandHandlers.Add(CommandName, Handler);
+	BlockingCommandNames.Add(CommandName);
+}
+
+void UYarnDialogueInstance::CompleteBlockingCommand()
+{
+	if (!bBlockingCommandPending)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: CompleteBlockingCommand called but no blocking command is pending"));
+		return;
+	}
+
+	bBlockingCommandPending = false;
+
+	// Defer Continue() to next tick, matching the non-blocking command path,
+	// so completing synchronously from inside the handler is also safe.
+	ContinueDeferred();
+}
+
+void UYarnDialogueInstance::AddFunction(const FString& FunctionName, TFunction<FYarnValue(const TArray<FYarnValue>&)> Function, int32 ParameterCount)
+{
+	Functions.Add(FunctionName, Function);
+	FunctionParameterCounts.Add(FunctionName, ParameterCount);
+}
+
+void UYarnDialogueInstance::RemoveFunction(const FString& FunctionName)
+{
+	Functions.Remove(FunctionName);
+	FunctionParameterCounts.Remove(FunctionName);
+}
+
+FYarnValue UYarnDialogueInstance::CallFunction(const FString& FunctionName, const TArray<FYarnValue>& Parameters)
+{
+	if (TFunction<FYarnValue(const TArray<FYarnValue>&)>* Func = Functions.Find(FunctionName))
+	{
+		return (*Func)(Parameters);
+	}
+
+	UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: Unknown function '%s'"), *FunctionName);
+	return FYarnValue();
+}
+
+FYarnValue UYarnDialogueInstance::CallFunctionForSmartVariable(const FString& FunctionName, const TArray<FYarnValue>& Parameters)
+{
+	FYarnValue Result = CallFunction(FunctionName, Parameters);
+
+	FString FunctionError;
+	if (TakeFunctionError(FunctionError))
+	{
+		UE_LOG(LogYarnSpinner, Error, TEXT("Smart variable evaluation: %s"), *FunctionError);
+		return FYarnValue();
+	}
+
+	return Result;
+}
+
+bool UYarnDialogueInstance::FunctionExists(const FString& FunctionName)
+{
+	return Functions.Contains(FunctionName);
+}
+
+int32 UYarnDialogueInstance::GetFunctionParameterCount(const FString& FunctionName)
+{
+	const int32* Count = FunctionParameterCounts.Find(FunctionName);
+	return Count ? *Count : -1;
+}
+
+void UYarnDialogueInstance::ReportFunctionError(const FString& Message)
+{
+	LastFunctionError = Message;
+	UE_LOG(LogYarnSpinner, Error, TEXT("%s"), *Message);
+}
+
+bool UYarnDialogueInstance::TakeFunctionError(FString& OutMessage)
+{
+	if (LastFunctionError.IsEmpty())
+	{
+		return false;
+	}
+
+	OutMessage = LastFunctionError;
+	LastFunctionError.Empty();
+	return true;
+}
+
+// Hoisted out of RegisterBuiltInFunctions() lambdas: Clang 19 + UE5.7's consteval
+// FString::Printf format-string check trips "cannot take address of immediate call
+// operator" when these are written inline as TFunction-bound lambdas.
+static bool YarnStringIsStrictlyNumeric(const FString& InString)
+{
+	const FString Trimmed = InString.TrimStartAndEnd();
+	if (Trimmed.IsEmpty())
+	{
+		return false;
+	}
+
+	const int32 Len = Trimmed.Len();
+	int32 Index = 0;
+
+	if (Trimmed[Index] == TEXT('+') || Trimmed[Index] == TEXT('-'))
+	{
+		Index++;
+	}
+
+	bool bSawDigit = false;
+	while (Index < Len && FChar::IsDigit(Trimmed[Index]))
+	{
+		bSawDigit = true;
+		Index++;
+	}
+
+	if (Index < Len && Trimmed[Index] == TEXT('.'))
+	{
+		Index++;
+		while (Index < Len && FChar::IsDigit(Trimmed[Index]))
+		{
+			bSawDigit = true;
+			Index++;
+		}
+	}
+
+	if (!bSawDigit)
+	{
+		return false;
+	}
+
+	if (Index < Len && (Trimmed[Index] == TEXT('e') || Trimmed[Index] == TEXT('E')))
+	{
+		Index++;
+		if (Index < Len && (Trimmed[Index] == TEXT('+') || Trimmed[Index] == TEXT('-')))
+		{
+			Index++;
+		}
+
+		bool bSawExponentDigit = false;
+		while (Index < Len && FChar::IsDigit(Trimmed[Index]))
+		{
+			bSawExponentDigit = true;
+			Index++;
+		}
+
+		if (!bSawExponentDigit)
+		{
+			return false;
+		}
+	}
+
+	return Index == Len;
+}
+
+static FYarnValue YarnFn_FormatInvariant(const TArray<FYarnValue>& Params)
+{
+	if (Params.Num() < 1) return FYarnValue(FString());
+	float Value = Params[0].ConvertToNumber();
+	FString Text = FString::Printf(TEXT("%.7g"), Value);
+	if (FCString::Atof(*Text) != Value)
+	{
+		Text = FString::Printf(TEXT("%.9g"), Value);
+	}
+	return FYarnValue(Text);
+}
+
+static void YarnCheckUnmatchedFormatMarkers(const FString& Result, UYarnDialogueInstance* Instance)
+{
+	if (!Instance)
+	{
+		return;
+	}
+
+	const int32 Len = Result.Len();
+	for (int32 i = 0; i < Len; i++)
+	{
+		if (Result[i] != TEXT('{'))
+		{
+			continue;
+		}
+
+		int32 j = i + 1;
+		while (j < Len && FChar::IsDigit(Result[j]))
+		{
+			j++;
+		}
+
+		if (j > i + 1 && j < Len && Result[j] == TEXT('}'))
+		{
+			Instance->ReportFunctionError(FString::Printf(TEXT("format(): result has an unmatched format marker: \"%s\""), *Result));
+			return;
+		}
+	}
+}
+
+static FYarnValue YarnFn_Format(const TArray<FYarnValue>& Params, UYarnDialogueInstance* Instance)
+{
+	if (Params.Num() < 2) return FYarnValue(FString());
+	FString FormatString = Params[0].ConvertToString();
+
+	// Check if there's a format specifier: {0:spec}
+	int32 ColonPos = INDEX_NONE;
+	int32 BraceStart = FormatString.Find(TEXT("{0"));
+	if (BraceStart != INDEX_NONE)
+	{
+		int32 BraceEnd = FormatString.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, BraceStart);
+		if (BraceEnd != INDEX_NONE)
+		{
+			FString PlaceholderContent = FormatString.Mid(BraceStart + 1, BraceEnd - BraceStart - 1);
+			int32 LocalColon;
+			if (PlaceholderContent.FindChar(TEXT(':'), LocalColon))
+			{
+				ColonPos = BraceStart + 1 + LocalColon;
+			}
+		}
+
+		if (ColonPos != INDEX_NONE)
+		{
+			// Has format specifier - extract it
+			int32 BraceEnd2 = FormatString.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ColonPos);
+			if (BraceEnd2 != INDEX_NONE)
+			{
+				FString Specifier = FormatString.Mid(ColonPos + 1, BraceEnd2 - ColonPos - 1);
+				FString Placeholder = FormatString.Mid(BraceStart, BraceEnd2 - BraceStart + 1);
+				FString Formatted;
+
+				float NumValue = Params[1].ConvertToNumber();
+				TCHAR SpecChar = Specifier.Len() > 0 ? FChar::ToUpper(Specifier[0]) : TEXT('G');
+				int32 Precision = Specifier.Len() > 1 ? FCString::Atoi(*Specifier.Mid(1)) : -1;
+
+				switch (SpecChar)
+				{
+				case TEXT('F'): // Fixed-point
+					Formatted = FString::Printf(TEXT("%.*f"), Precision >= 0 ? Precision : 2, NumValue);
+					break;
+				case TEXT('N'): // Number with thousand separators
+				{
+					int32 DecPlaces = Precision >= 0 ? Precision : 2;
+					FString NumStr = FString::Printf(TEXT("%.*f"), DecPlaces, FMath::Abs(NumValue));
+					int32 DotPos;
+					FString IntPart, FracPart;
+					if (NumStr.FindChar(TEXT('.'), DotPos))
+					{
+						IntPart = NumStr.Left(DotPos);
+						FracPart = NumStr.Mid(DotPos);
+					}
+					else
+					{
+						IntPart = NumStr;
+					}
+					FString WithSeparators;
+					int32 Count = 0;
+					for (int32 j = IntPart.Len() - 1; j >= 0; j--)
+					{
+						if (Count > 0 && Count % 3 == 0) WithSeparators = TEXT(",") + WithSeparators;
+						WithSeparators = FString(1, &IntPart[j]) + WithSeparators;
+						Count++;
+					}
+					Formatted = (NumValue < 0 ? TEXT("-") : TEXT("")) + WithSeparators + FracPart;
+					break;
+				}
+				case TEXT('D'): // Decimal integer
+				{
+					int32 Width = Precision >= 0 ? Precision : 1;
+					Formatted = FString::Printf(TEXT("%0*d"), Width, FMath::RoundToInt(NumValue));
+					break;
+				}
+				case TEXT('P'): // Percent
+				{
+					int32 DecPlaces = Precision >= 0 ? Precision : 2;
+					Formatted = FString::Printf(TEXT("%.*f %%"), DecPlaces, NumValue * 100.0f);
+					break;
+				}
+				case TEXT('E'): // Scientific
+					Formatted = FString::Printf(TEXT("%.*e"), Precision >= 0 ? Precision : 6, NumValue);
+					break;
+				case TEXT('G'): // General format - shortest representation
+					Formatted = FString::Printf(TEXT("%.*g"), Precision >= 0 ? Precision : 7, NumValue);
+					break;
+				case TEXT('X'): // Hexadecimal
+				{
+					int32 IntVal = FMath::RoundToInt(NumValue);
+					int32 Width = Precision >= 0 ? Precision : 0;
+					if (Specifier.Len() > 0 && FChar::IsLower(Specifier[0]))
+					{
+						Formatted = FString::Printf(TEXT("%0*x"), Width, IntVal);
+					}
+					else
+					{
+						Formatted = FString::Printf(TEXT("%0*X"), Width, IntVal);
+					}
+					break;
+				}
+				case TEXT('C'): // Currency
+				{
+					int32 DecPlaces = Precision >= 0 ? Precision : 2;
+					FString NumStr = FString::Printf(TEXT("%.*f"), DecPlaces, FMath::Abs(NumValue));
+					int32 DotPos;
+					FString IntPart, FracPart;
+					if (NumStr.FindChar(TEXT('.'), DotPos))
+					{
+						IntPart = NumStr.Left(DotPos);
+						FracPart = NumStr.Mid(DotPos);
+					}
+					else
+					{
+						IntPart = NumStr;
+					}
+					FString WithSeparators;
+					int32 SepCount = 0;
+					for (int32 j = IntPart.Len() - 1; j >= 0; j--)
+					{
+						if (SepCount > 0 && SepCount % 3 == 0) WithSeparators = TEXT(",") + WithSeparators;
+						WithSeparators = FString(1, &IntPart[j]) + WithSeparators;
+						SepCount++;
+					}
+					Formatted = (NumValue < 0 ? TEXT("($") : TEXT("$")) + WithSeparators + FracPart + (NumValue < 0 ? TEXT(")") : TEXT(""));
+					break;
+				}
+				case TEXT('R'): // Round-trip - preserve full float precision
+					Formatted = FString::Printf(TEXT("%.9g"), NumValue);
+					break;
+				default: // Unknown specifier - use general format
+					Formatted = FString::Printf(TEXT("%.7g"), NumValue);
+					break;
+				}
+
+				FString Result = FormatString.Replace(*Placeholder, *Formatted);
+				YarnCheckUnmatchedFormatMarkers(Result, Instance);
+				return FYarnValue(Result);
+			}
+		}
+	}
+
+	// No format specifier - simple {0} replacement
+	FString ArgString = Params[1].ConvertToString();
+	FString Result = FormatString.Replace(TEXT("{0}"), *ArgString);
+	YarnCheckUnmatchedFormatMarkers(Result, Instance);
+	return FYarnValue(Result);
+}
+
+void UYarnDialogueInstance::RegisterBuiltInFunctions()
+{
+	// ============================================
+	// ARITHMETIC OPERATORS (used by compiler for +, -, *, /, %)
+	// ============================================
+
+	AddFunction(TEXT("Number.Add"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		return FYarnValue(Params[0].ConvertToNumber() + Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.Minus"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		return FYarnValue(Params[0].ConvertToNumber() - Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.Multiply"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		return FYarnValue(Params[0].ConvertToNumber() * Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.Divide"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		// Division by zero produces NaN/inf (no guard)
+		return FYarnValue(Params[0].ConvertToNumber() / Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.Modulo"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		int32 Divisor = static_cast<int32>(Params[1].ConvertToNumber());
+		if (Divisor == 0)
+		{
+			ReportFunctionError(TEXT("modulo by zero"));
+			return FYarnValue(0.0f);
+		}
+		int32 Dividend = static_cast<int32>(Params[0].ConvertToNumber());
+		return FYarnValue(static_cast<float>(Dividend % Divisor));
+	}, 2);
+
+	AddFunction(TEXT("Number.UnaryMinus"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		return FYarnValue(-Params[0].ConvertToNumber());
+	}, 1);
+
+	// ============================================
+	// COMPARISON OPERATORS (used by compiler for <, <=, >, >=, ==, !=)
+	// ============================================
+
+	AddFunction(TEXT("Number.EqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToNumber() == Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.NotEqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToNumber() != Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.GreaterThan"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToNumber() > Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.GreaterThanOrEqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToNumber() >= Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.LessThan"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToNumber() < Params[1].ConvertToNumber());
+	}, 2);
+
+	AddFunction(TEXT("Number.LessThanOrEqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToNumber() <= Params[1].ConvertToNumber());
+	}, 2);
+
+	// ============================================
+	// BOOLEAN OPERATORS (used by compiler for &&, ||, !, ==, !=)
+	// ============================================
+
+	AddFunction(TEXT("Bool.EqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToBool() == Params[1].ConvertToBool());
+	}, 2);
+
+	AddFunction(TEXT("Bool.NotEqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToBool() != Params[1].ConvertToBool());
+	}, 2);
+
+	AddFunction(TEXT("Bool.And"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToBool() && Params[1].ConvertToBool());
+	}, 2);
+
+	AddFunction(TEXT("Bool.Or"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToBool() || Params[1].ConvertToBool());
+	}, 2);
+
+	AddFunction(TEXT("Bool.Not"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(false);
+		return FYarnValue(!Params[0].ConvertToBool());
+	}, 1);
+
+	AddFunction(TEXT("Bool.Xor"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToBool() != Params[1].ConvertToBool());
+	}, 2);
+
+	// ============================================
+	// ENUM OPERATORS
+	// ============================================
+
+	AddFunction(TEXT("Enum.EqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		// At VM level, enum values are strings, so we compare as strings.
+		return FYarnValue(Params[0].ConvertToString().Equals(Params[1].ConvertToString(), ESearchCase::CaseSensitive));
+	}, 2);
+
+	AddFunction(TEXT("Enum.NotEqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(!Params[0].ConvertToString().Equals(Params[1].ConvertToString(), ESearchCase::CaseSensitive));
+	}, 2);
+
+	// ============================================
+	// STRING OPERATORS
+	// ============================================
+
+	AddFunction(TEXT("String.Add"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(FString());
+		return FYarnValue(Params[0].ConvertToString() + Params[1].ConvertToString());
+	}, 2);
+
+	AddFunction(TEXT("String.EqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(Params[0].ConvertToString().Equals(Params[1].ConvertToString(), ESearchCase::CaseSensitive));
+	}, 2);
+
+	AddFunction(TEXT("String.NotEqualTo"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(false);
+		return FYarnValue(!Params[0].ConvertToString().Equals(Params[1].ConvertToString(), ESearchCase::CaseSensitive));
+	}, 2);
+
+	// ============================================
+	// YARN SPINNER BUILT-IN FUNCTIONS
+	// ============================================
+
+	// visited(node_name) - returns true if the node has been visited
+	AddFunction(TEXT("visited"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(false);
+		if (!Owner.IsValid()) return FYarnValue(false);
+
+		FString NodeName = Params[0].ConvertToString();
+		FString VariableName = FString::Printf(TEXT("$Yarn.Internal.Visiting.%s"), *NodeName);
+
+		FYarnValue Value;
+		if (Owner->VariableStorage.GetInterface())
+		{
+			if (IYarnVariableStorage::Execute_TryGetValue(Owner->VariableStorage.GetObject(), VariableName, Value))
+			{
+				return FYarnValue(Value.ConvertToNumber() > 0);
+			}
+		}
+		return FYarnValue(false);
+	}, 1);
+
+	// visited_count(node_name) - returns the number of times a node has been visited
+	AddFunction(TEXT("visited_count"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		if (!Owner.IsValid()) return FYarnValue(0.0f);
+
+		FString NodeName = Params[0].ConvertToString();
+		FString VariableName = FString::Printf(TEXT("$Yarn.Internal.Visiting.%s"), *NodeName);
+
+		FYarnValue Value;
+		if (Owner->VariableStorage.GetInterface())
+		{
+			if (IYarnVariableStorage::Execute_TryGetValue(Owner->VariableStorage.GetObject(), VariableName, Value))
+			{
+				return Value;
+			}
+		}
+		return FYarnValue(0.0f);
+	}, 1);
+
+	// random() - returns a random number between 0 and 1
+	AddFunction(TEXT("random"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		return FYarnValue(FMath::FRand());
+	}, 0);
+
+	// random_range(min, max) - returns a random integer-stepped value between min and max
+	// Truncates min/max toward zero, then picks a random integer step and adds float min.
+	// E.g., random_range(1.5, 5.7) produces [1.5, 5.5] in integer steps
+	AddFunction(TEXT("random_range"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+
+		float Min = Params[0].ConvertToNumber();
+		float Max = Params[1].ConvertToNumber();
+		// Truncation toward zero (not floor)
+		int32 MinInt = static_cast<int32>(Min);
+		int32 MaxInt = static_cast<int32>(Max);
+		int32 Range = MaxInt - MinInt + 1;
+		if (Range <= 0) Range = 1;
+		// Returns [0, Range-1]
+		int32 RandomValue = FMath::RandRange(0, Range - 1);
+		return FYarnValue(static_cast<float>(RandomValue) + Min);
+	}, 2);
+
+	// dice(sides) - returns a random integer from 1 to sides
+	AddFunction(TEXT("dice"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(1.0f);
+
+		int32 Sides = FMath::RoundToInt(Params[0].ConvertToNumber());
+		return FYarnValue(static_cast<float>(FMath::RandRange(1, Sides)));
+	}, 1);
+
+	// round(number) - rounds to nearest integer using banker's rounding (round-to-even)
+	// E.g., round(2.5) = 2, round(3.5) = 4
+	AddFunction(TEXT("round"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		// std::nearbyint uses the current rounding mode (default FE_TONEAREST = round-to-even)
+		return FYarnValue(std::nearbyintf(Params[0].ConvertToNumber()));
+	}, 1);
+
+	// round_places(number, places) - rounds to specified decimal places using banker's rounding
+	AddFunction(TEXT("round_places"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+
+		float Value = Params[0].ConvertToNumber();
+		int32 Places = FMath::RoundToInt(Params[1].ConvertToNumber());
+		float Multiplier = FMath::Pow(10.0f, static_cast<float>(Places));
+		return FYarnValue(std::nearbyintf(Value * Multiplier) / Multiplier);
+	}, 2);
+
+	// floor(number) - rounds down
+	AddFunction(TEXT("floor"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		return FYarnValue(FMath::FloorToFloat(Params[0].ConvertToNumber()));
+	}, 1);
+
+	// ceil(number) - rounds up
+	AddFunction(TEXT("ceil"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		return FYarnValue(FMath::CeilToFloat(Params[0].ConvertToNumber()));
+	}, 1);
+
+	// inc(number) - increments by 1 (returns int)
+	// If the value is already an integer, adds 1. Otherwise, rounds up to the next integer.
+	AddFunction(TEXT("inc"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(1.0f);
+		float Value = Params[0].ConvertToNumber();
+		if (static_cast<float>(static_cast<int32>(Value)) == Value)
+		{
+			return FYarnValue(static_cast<float>(static_cast<int32>(Value) + 1));
+		}
+		else
+		{
+			return FYarnValue(static_cast<float>(FMath::CeilToInt(Value)));
+		}
+	}, 1);
+
+	// dec(number) - decrements by 1 (returns int)
+	// If the value is already an integer, subtracts 1. Otherwise, rounds down to the previous integer.
+	AddFunction(TEXT("dec"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(-1.0f);
+		float Value = Params[0].ConvertToNumber();
+		if (static_cast<float>(static_cast<int32>(Value)) == Value)
+		{
+			return FYarnValue(static_cast<float>(static_cast<int32>(Value) - 1));
+		}
+		else
+		{
+			return FYarnValue(static_cast<float>(FMath::FloorToInt(Value)));
+		}
+	}, 1);
+
+	// decimal(number) - returns the decimal portion
+	AddFunction(TEXT("decimal"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		float Value = Params[0].ConvertToNumber();
+		return FYarnValue(Value - FMath::TruncToFloat(Value));
+	}, 1);
+
+	// int(number) - returns the integer portion (truncates toward zero)
+	AddFunction(TEXT("int"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+		return FYarnValue(FMath::TruncToFloat(Params[0].ConvertToNumber()));
+	}, 1);
+
+	// ============================================
+	// YARN SPINNER 3.1 ADDITIONAL FUNCTIONS
+	// ============================================
+
+	// min(a, b) - returns the minimum of two numbers
+	AddFunction(TEXT("min"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		return FYarnValue(FMath::Min(Params[0].ConvertToNumber(), Params[1].ConvertToNumber()));
+	}, 2);
+
+	// max(a, b) - returns the maximum of two numbers
+	AddFunction(TEXT("max"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+		return FYarnValue(FMath::Max(Params[0].ConvertToNumber(), Params[1].ConvertToNumber()));
+	}, 2);
+
+	// random_range_float(min, max) - identical to random_range
+	AddFunction(TEXT("random_range_float"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 2) return FYarnValue(0.0f);
+
+		float Min = Params[0].ConvertToNumber();
+		float Max = Params[1].ConvertToNumber();
+		int32 MinInt = static_cast<int32>(Min);
+		int32 MaxInt = static_cast<int32>(Max);
+		int32 Range = MaxInt - MinInt + 1;
+		if (Range <= 0) Range = 1;
+		int32 RandomValue = FMath::RandRange(0, Range - 1);
+		return FYarnValue(static_cast<float>(RandomValue) + Min);
+	}, 2);
+
+	// ============================================
+	// TYPE CONVERSION FUNCTIONS
+	// ============================================
+
+	// string(v) - converts any value to string
+	AddFunction(TEXT("string"), [](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(FString());
+		return FYarnValue(Params[0].ConvertToString());
+	}, 1);
+
+	AddFunction(TEXT("number"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(0.0f);
+
+		const FYarnValue& Param = Params[0];
+		if (Param.Type == EYarnValueType::String)
+		{
+			const FString& StringValue = Param.GetStringValue();
+			if (!YarnStringIsStrictlyNumeric(StringValue))
+			{
+				ReportFunctionError(FString::Printf(TEXT("number(): \"%s\" is not a valid number"), *StringValue));
+				return FYarnValue(0.0f);
+			}
+			return FYarnValue(FCString::Atof(*StringValue));
+		}
+
+		return FYarnValue(Param.ConvertToNumber());
+	}, 1);
+
+	AddFunction(TEXT("bool"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(false);
+
+		const FYarnValue& Param = Params[0];
+		switch (Param.Type)
+		{
+		case EYarnValueType::String:
+			if (Param.GetStringValue().Equals(TEXT("true"), ESearchCase::IgnoreCase))
+			{
+				return FYarnValue(true);
+			}
+			if (Param.GetStringValue().Equals(TEXT("false"), ESearchCase::IgnoreCase))
+			{
+				return FYarnValue(false);
+			}
+			ReportFunctionError(FString::Printf(TEXT("bool(): \"%s\" is not a valid bool"), *Param.GetStringValue()));
+			return FYarnValue(false);
+
+		case EYarnValueType::Number:
+			return FYarnValue(Param.GetNumberValue() != 0.0f);
+
+		case EYarnValueType::Bool:
+			return FYarnValue(Param.GetBoolValue());
+
+		default:
+			return FYarnValue(false);
+		}
+	}, 1);
+
+	// ============================================
+	// FORMAT FUNCTIONS
+	// ============================================
+
+	// format_invariant(v) - formats a number using invariant culture
+	// Critical for embedding numbers in commands that need consistent formatting
+	AddFunction(TEXT("format_invariant"), &YarnFn_FormatInvariant, 1);
+
+	// format(formatString, argument) - formats a value using the format string
+	// Supports .NET-style format specifiers: {0}, {0:F2}, {0:N0}, {0:D4}, etc.
+	AddFunction(TEXT("format"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		return YarnFn_Format(Params, this);
+	}, 2);
+
+	// ============================================
+	// SALIENCY FUNCTIONS
+	// ============================================
+
+	// has_any_content(nodeGroup) - returns true if the node group has any available content
+	AddFunction(TEXT("has_any_content"), [this](const TArray<FYarnValue>& Params) -> FYarnValue {
+		if (Params.Num() < 1) return FYarnValue(false);
+		if (!Owner.IsValid()) return FYarnValue(false);
+
+		FString NodeGroupName = Params[0].ConvertToString();
+
+		if (!Owner->YarnProject)
+		{
+			return FYarnValue(false);
+		}
+
+		const FYarnNode* Node = Owner->YarnProject->Program.Nodes.Find(NodeGroupName);
+		if (!Node)
+		{
+			return FYarnValue(false);
+		}
+
+		// Check if this node is a node group hub
+		if (!Node->HasHeader(TEXT("$Yarn.Internal.NodeGroupHub")))
+		{
+			return FYarnValue(true);
+		}
+
+		// Use GetSaliencyOptionsForNodeGroup to properly evaluate smart variable conditions
+		FOnSmartVariableCallFunction CallFunctionHandler;
+		CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
+			return CallFunctionForSmartVariable(FunctionName, Parameters);
+		});
+
+		TArray<FYarnSaliencyCandidate> Candidates;
+		FYarnSmartVariableEvaluationVM::GetSaliencyOptionsForNodeGroup(
+			NodeGroupName,
+			Owner->YarnProject->Program,
+			Owner->VariableStorage,
+			CallFunctionHandler,
+			Candidates);
+
+		if (Candidates.Num() == 0)
+		{
+			return FYarnValue(false);
+		}
+
+		// Check if any candidate can be selected by the saliency strategy
+		if (!ActiveSaliencyStrategy.GetObject())
+		{
+			// No strategy means we can't determine - assume content exists
+			return FYarnValue(true);
+		}
+
+		// Check if any candidate can be selected
+		FYarnSaliencyCandidate SelectedCandidate;
+		bool bHasContent = IYarnSaliencyStrategy::Execute_QueryBestContent(ActiveSaliencyStrategy.GetObject(), Candidates, SelectedCandidate);
+		return FYarnValue(bHasContent);
+	}, 1);
+}
+
+FYarnLocalizedLine UYarnDialogueInstance::GetLocalizedLine(const FYarnLine& Line)
+{
+	if (Owner.IsValid() && Owner->LineProvider)
+	{
+		return Owner->LineProvider->GetLocalizedLine(Line);
+	}
+
+	// Fallback: return the line ID as text
+	FYarnLocalizedLine LocalizedLine;
+	LocalizedLine.RawLine = Line;
+	LocalizedLine.Text = FText::FromString(Line.LineID);
+	return LocalizedLine;
+}
+
+void UYarnDialogueInstance::OnWaitComplete()
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	if (Owner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Wait complete, continuing dialogue"));
+	}
+
+	if (VirtualMachine.IsActive())
+	{
+		VirtualMachine.Continue();
+	}
+}
+
+FYarnLineCancellationToken UYarnDialogueInstance::GetCurrentCancellationToken()
+{
+	// Lazy-create a linked source if asked for a token before HandleLine has
+	// fired. Linking to the dialogue source ensures any dialogue-level
+	// cancellation propagates correctly.
+	if (!CancellationTokenSource)
+	{
+		if (!DialogueCancellationSource)
+		{
+			DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+		}
+		CancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, CancellationTokenSource);
+	}
+	return CancellationTokenSource->GetToken();
+}
+
+FYarnLineCancellationToken UYarnDialogueInstance::GetCurrentOptionsCancellationToken()
+{
+	if (!OptionsCancellationTokenSource)
+	{
+		if (!DialogueCancellationSource)
+		{
+			DialogueCancellationSource = NewObject<UYarnCancellationTokenSource>(this);
+		}
+		OptionsCancellationTokenSource = MakeLinkedContentSource(this, DialogueCancellationSource, OptionsCancellationTokenSource);
+	}
+	return OptionsCancellationTokenSource->GetToken();
+}
+
+bool UYarnDialogueInstance::IsHurryUpRequested() const
+{
+	return CancellationTokenSource ? CancellationTokenSource->IsHurryUpRequested() : false;
+}
+
+bool UYarnDialogueInstance::IsNextContentRequested() const
+{
+	// Method name kept for back-compat with existing presenters; the source's
+	// canonical method is IsCancellationRequested.
+	return CancellationTokenSource ? CancellationTokenSource->IsCancellationRequested() : false;
+}
+
+bool UYarnDialogueInstance::IsOptionHurryUpRequested() const
+{
+	return OptionsCancellationTokenSource ? OptionsCancellationTokenSource->IsHurryUpRequested() : false;
+}
+
+bool UYarnDialogueInstance::IsOptionNextContentRequested() const
+{
+	return OptionsCancellationTokenSource ? OptionsCancellationTokenSource->IsCancellationRequested() : false;
+}
+
+void UYarnDialogueInstance::CreateSaliencyStrategy()
+{
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	// Honour a strategy that was installed externally (via SetSaliencyStrategy)
+	if (bCustomSaliencyStrategyInstalled && ActiveSaliencyStrategy.GetObject())
+	{
+		return;
+	}
+
+	if (!ActiveSaliencyStrategy.GetObject() || CreatedSaliencyStrategyType != RunnerOwner->SaliencyStrategy)
+	{
+		ActiveSaliencyStrategy = UYarnSaliencyStrategyFactory::CreateStrategy(
+			RunnerOwner->SaliencyStrategy,
+			RunnerOwner->VariableStorage,
+			RunnerOwner
+		);
+		CreatedSaliencyStrategyType = RunnerOwner->SaliencyStrategy;
+	}
+}
+
+void UYarnDialogueInstance::SetSaliencyStrategy(TScriptInterface<IYarnSaliencyStrategy> InStrategy)
+{
+	ActiveSaliencyStrategy = InStrategy;
+	bCustomSaliencyStrategyInstalled = InStrategy.GetObject() != nullptr;
+}
+
+void UYarnDialogueInstance::HandleAddSaliencyCandidate(const FYarnSaliencyCandidate& Candidate)
+{
+	if (Owner.IsValid() && Owner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Adding saliency candidate '%s' (complexity: %d, failing: %d)"),
+			*Candidate.ContentID, Candidate.ComplexityScore, Candidate.FailingConditionCount);
+	}
+	SaliencyCandidates.Add(Candidate);
+}
+
+bool UYarnDialogueInstance::HandleSelectSaliencyCandidate(FYarnSaliencyCandidate& OutSelectedCandidate)
+{
+	const bool bVerboseLogging = Owner.IsValid() && Owner->bVerboseLogging;
+
+	if (!ActiveSaliencyStrategy.GetObject())
+	{
+		CreateSaliencyStrategy();
+	}
+
+	if (!ActiveSaliencyStrategy.GetObject())
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: No saliency strategy available"));
+		return false;
+	}
+
+	bool bSelected = IYarnSaliencyStrategy::Execute_QueryBestContent(ActiveSaliencyStrategy.GetObject(), SaliencyCandidates, OutSelectedCandidate);
+
+	if (bSelected)
+	{
+		IYarnSaliencyStrategy::Execute_ContentWasSelected(ActiveSaliencyStrategy.GetObject(), OutSelectedCandidate);
+
+		if (bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Selected saliency candidate '%s'"),
+				*OutSelectedCandidate.ContentID);
+		}
+	}
+	else
+	{
+		if (bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: No viable saliency candidate found"));
+		}
+	}
+
+	// Clear candidates for next selection
+	ClearSaliencyCandidates();
+
+	return bSelected;
+}
+
+bool UYarnDialogueInstance::HandleVMSelectSaliencyCandidate(const TArray<FYarnSaliencyCandidate>& Candidates, FYarnSaliencyCandidate& OutSelectedCandidate)
+{
+	const bool bVerboseLogging = Owner.IsValid() && Owner->bVerboseLogging;
+
+	if (!ActiveSaliencyStrategy.GetObject())
+	{
+		CreateSaliencyStrategy();
+	}
+
+	if (!ActiveSaliencyStrategy.GetObject())
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: No saliency strategy available for VM selection"));
+		return false;
+	}
+
+	// This is a read-only query. ContentWasSelected will be called
+	// separately by the VM via ContentWasSelectedHandler after validation.
+	bool bSelected = IYarnSaliencyStrategy::Execute_QueryBestContent(ActiveSaliencyStrategy.GetObject(), Candidates, OutSelectedCandidate);
+
+	if (bSelected)
+	{
+		if (bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: VM saliency strategy selected '%s'"),
+				*OutSelectedCandidate.ContentID);
+		}
+	}
+	else
+	{
+		if (bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: VM saliency strategy found no viable candidate"));
+		}
+	}
+
+	return bSelected;
+}
+
+void UYarnDialogueInstance::HandleContentWasSelected(const FYarnSaliencyCandidate& SelectedCandidate)
+{
+	// Called by the VM after it validates the selection.
+	// Notifies the strategy that content was selected (for LeastRecentlyViewed tracking).
+	if (ActiveSaliencyStrategy.GetObject())
+	{
+		IYarnSaliencyStrategy::Execute_ContentWasSelected(ActiveSaliencyStrategy.GetObject(), SelectedCandidate);
+
+		if (Owner.IsValid() && Owner->bVerboseLogging)
+		{
+			UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Notified strategy that content '%s' was selected"),
+				*SelectedCandidate.ContentID);
+		}
+	}
+}
+
+void UYarnDialogueInstance::ClearSaliencyCandidates()
+{
+	SaliencyCandidates.Empty();
+}
+
+void UYarnDialogueInstance::HandlePrepareForLines(const TArray<FString>& LineIDs)
+{
+	// This handler is called when a new node is started, providing the line IDs
+	// that will be needed. This allows pre-loading of localisation and audio assets.
+	// Notify presenters that they may want to prepare these lines.
+
+	if (LineIDs.Num() == 0)
+	{
+		return;
+	}
+
+	if (!Owner.IsValid())
+	{
+		return;
+	}
+
+	UYarnDialogueRunner* RunnerOwner = Owner.Get();
+
+	if (RunnerOwner->bVerboseLogging)
+	{
+		UE_LOG(LogYarnSpinner, Log, TEXT("YarnDialogueRunner: Preparing for %d lines in upcoming node"), LineIDs.Num());
+	}
+
+	// Give the line provider a chance to preload content (localised audio,
+	// external assets) before the lines run.
+	if (RunnerOwner->LineProvider)
+	{
+		RunnerOwner->LineProvider->PrepareForLines(LineIDs);
+	}
+
+	// Notify presenters (if they support it, they can pre-load assets)
+	for (UYarnDialoguePresenter* Presenter : RunnerOwner->DialoguePresenters)
+	{
+		if (Presenter)
+		{
+			Presenter->OnPrepareForLines(LineIDs);
+		}
+	}
+}
+
+// ============================================================================
+// Smart variables are compiled expression nodes that compute values on-the-fly.
+
+bool UYarnDialogueInstance::TryGetSmartVariableAsBool(const FString& Name, bool& OutResult)
+{
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		OutResult = false;
+		return false;
+	}
+
+	// Create a function call handler that uses our registered functions
+	FOnSmartVariableCallFunction CallFunctionHandler;
+	CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
+		return CallFunctionForSmartVariable(FunctionName, Parameters);
+	});
+
+	return FYarnSmartVariableEvaluationVM::TryGetSmartVariableAsBool(
+		Name,
+		Owner->YarnProject->Program,
+		Owner->VariableStorage,
+		CallFunctionHandler,
+		OutResult);
+}
+
+bool UYarnDialogueInstance::TryGetSmartVariableAsFloat(const FString& Name, float& OutResult)
+{
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		OutResult = 0.0f;
+		return false;
+	}
+
+	// Create a function call handler that uses our registered functions
+	FOnSmartVariableCallFunction CallFunctionHandler;
+	CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
+		return CallFunctionForSmartVariable(FunctionName, Parameters);
+	});
+
+	return FYarnSmartVariableEvaluationVM::TryGetSmartVariableAsFloat(
+		Name,
+		Owner->YarnProject->Program,
+		Owner->VariableStorage,
+		CallFunctionHandler,
+		OutResult);
+}
+
+bool UYarnDialogueInstance::TryGetSmartVariableAsString(const FString& Name, FString& OutResult)
+{
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		OutResult = FString();
+		return false;
+	}
+
+	// Create a function call handler that uses our registered functions
+	FOnSmartVariableCallFunction CallFunctionHandler;
+	CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
+		return CallFunctionForSmartVariable(FunctionName, Parameters);
+	});
+
+	return FYarnSmartVariableEvaluationVM::TryGetSmartVariableAsString(
+		Name,
+		Owner->YarnProject->Program,
+		Owner->VariableStorage,
+		CallFunctionHandler,
+		OutResult);
+}
+
+bool UYarnDialogueInstance::TryGetSmartVariable(const FString& Name, FYarnValue& OutResult)
+{
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		OutResult = FYarnValue();
+		return false;
+	}
+
+	static thread_local int32 SmartVariableDepth = 0;
+	constexpr int32 MaxSmartVariableDepth = 16;
+	if (SmartVariableDepth >= MaxSmartVariableDepth)
+	{
+		UE_LOG(LogYarnSpinner, Error, TEXT("YarnDialogueRunner: Smart variable '%s' exceeded evaluation depth %d - likely a circular reference"), *Name, MaxSmartVariableDepth);
+		OutResult = FYarnValue();
+		return false;
+	}
+	++SmartVariableDepth;
+	ON_SCOPE_EXIT { --SmartVariableDepth; };
+
+	// Create a function call handler that uses our registered functions
+	FOnSmartVariableCallFunction CallFunctionHandler;
+	CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
+		return CallFunctionForSmartVariable(FunctionName, Parameters);
+	});
+
+	return FYarnSmartVariableEvaluationVM::TryGetSmartVariable(
+		Name,
+		Owner->YarnProject->Program,
+		Owner->VariableStorage,
+		CallFunctionHandler,
+		OutResult);
+}

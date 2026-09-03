@@ -24,7 +24,7 @@
 #include "YarnSaliency.h"
 #include "YarnVirtualMachine.generated.h"
 
-/**
+ /**
  * The execution state of the virtual machine.
  */
 UENUM(BlueprintType)
@@ -49,42 +49,42 @@ enum class EYarnExecutionState : uint8
 	Error UMETA(DisplayName = "Error")
 };
 
-/**
+ /**
  * Delegate for when a line needs to be presented.
  */
 DECLARE_DELEGATE_OneParam(FOnYarnLine, const FYarnLine&);
 
-/**
+ /**
  * Delegate for when options need to be presented.
  */
 DECLARE_DELEGATE_OneParam(FOnYarnOptions, const FYarnOptionSet&);
 
-/**
+ /**
  * Delegate for when a command needs to be executed.
  */
 DECLARE_DELEGATE_OneParam(FOnYarnCommand, const FYarnCommand&);
 
-/**
+ /**
  * Delegate for when a node starts.
  */
 DECLARE_DELEGATE_OneParam(FOnYarnNodeStart, const FString&);
 
-/**
+ /**
  * Delegate for when a node completes.
  */
 DECLARE_DELEGATE_OneParam(FOnYarnNodeComplete, const FString&);
 
-/**
+ /**
  * Delegate for when the dialogue completes.
  */
 DECLARE_DELEGATE(FOnYarnDialogueComplete);
 
-/**
+ /**
  * Delegate for preparing lines (pre-loading localisation).
  */
 DECLARE_DELEGATE_OneParam(FOnYarnPrepareForLines, const TArray<FString>&);
 
-/**
+ /**
  * Delegate for calling a function.
  * @param FunctionName The name of the function to call.
  * @param Parameters The parameters to pass.
@@ -92,17 +92,22 @@ DECLARE_DELEGATE_OneParam(FOnYarnPrepareForLines, const TArray<FString>&);
  */
 DECLARE_DELEGATE_RetVal_TwoParams(FYarnValue, FOnYarnCallFunction, const FString&, const TArray<FYarnValue>&);
 
-/**
+ /**
  * Delegate to check if a function exists.
  */
 DECLARE_DELEGATE_RetVal_OneParam(bool, FOnYarnFunctionExists, const FString&);
 
-/**
+ /**
  * Delegate to get the expected parameter count for a function.
  */
 DECLARE_DELEGATE_RetVal_OneParam(int32, FOnYarnFunctionParamCount, const FString&);
 
-/**
+ /**
+ * the dialogue.
+ */
+DECLARE_DELEGATE_RetVal_OneParam(bool, FOnYarnFunctionErrored, FString&);
+
+ /**
  * Delegate to select the best saliency candidate using the configured strategy.
  * @param Candidates The list of candidates to choose from.
  * @param OutSelectedCandidate The selected candidate (if any).
@@ -110,16 +115,15 @@ DECLARE_DELEGATE_RetVal_OneParam(int32, FOnYarnFunctionParamCount, const FString
  */
 DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnYarnSelectSaliencyCandidate, const TArray<FYarnSaliencyCandidate>&, FYarnSaliencyCandidate&);
 
-/**
+ /**
  * Delegate to notify that saliency content was selected.
  * Called after a saliency candidate is selected and committed.
  * @param SelectedCandidate The candidate that was selected.
  */
 DECLARE_DELEGATE_OneParam(FOnYarnContentWasSelected, const FYarnSaliencyCandidate&);
 
-/**
+ /**
  * The Yarn Spinner virtual machine.
- *
  * Executes compiled Yarn programs by processing instructions
  * and delivering content to registered handlers.
  */
@@ -130,19 +134,19 @@ struct YARNSPINNER_API FYarnVirtualMachine
 
 	FYarnVirtualMachine();
 
-	/**
+	 /**
 	 * Set the program to execute.
 	 * @param InProgram The compiled Yarn program.
 	 */
 	void SetProgram(const FYarnProgram& InProgram);
 
-	/**
+	 /**
 	 * Get the current program.
 	 * @return The current program.
 	 */
 	const FYarnProgram& GetProgram() const { return Program; }
 
-	/**
+	 /**
 	 * Set the node to start execution from.
 	 * Clears state (stack, options) by default.
 	 * @param NodeName The name of the node to run.
@@ -150,7 +154,7 @@ struct YARNSPINNER_API FYarnVirtualMachine
 	 */
 	bool SetNode(const FString& NodeName);
 
-	/**
+	 /**
 	 * Set the node to start execution from with control over state clearing.
 	 * @param NodeName The name of the node to run.
 	 * @param bClearState If true, clears stack and options. Use false for detour returns.
@@ -158,42 +162,42 @@ struct YARNSPINNER_API FYarnVirtualMachine
 	 */
 	bool SetNode(const FString& NodeName, bool bClearState);
 
-	/**
+	 /**
 	 * Get the current node name.
 	 * @return The name of the currently executing node.
 	 */
 	const FString& GetCurrentNodeName() const { return CurrentNodeName; }
 
-	/**
+	 /**
 	 * Get the current execution state.
 	 * @return The current state of the VM.
 	 */
 	EYarnExecutionState GetExecutionState() const { return ExecutionState; }
 
-	/**
+	 /**
 	 * Check if the VM is currently active (not stopped).
 	 * @return True if the VM is running.
 	 */
 	bool IsActive() const { return ExecutionState != EYarnExecutionState::Stopped; }
 
-	/**
+	 /**
 	 * Continue execution after content has been handled.
 	 * @return True if execution continued successfully.
 	 */
 	bool Continue();
 
-	/**
+	 /**
 	 * Stop execution immediately.
 	 */
 	void Stop();
 
-	/**
+	 /**
 	 * Set the selected option after options have been presented.
 	 * @param OptionIndex The index of the selected option.
 	 */
 	void SetSelectedOption(int32 OptionIndex);
 
-	/**
+	 /**
 	 * Signal that content delivery is complete.
 	 * Call this when async content presentation is finished.
 	 */
@@ -229,16 +233,18 @@ struct YARNSPINNER_API FYarnVirtualMachine
 	/** Handler to get expected parameter count */
 	FOnYarnFunctionParamCount FunctionParamCountHandler;
 
+	FOnYarnFunctionErrored FunctionErroredHandler;
+
 	/** Handler to select best saliency candidate using configured strategy */
 	FOnYarnSelectSaliencyCandidate SelectSaliencyCandidateHandler;
 
 	/** Handler to notify that saliency content was selected (for tracking view counts) */
 	FOnYarnContentWasSelected ContentWasSelectedHandler;
 
-	/** Variable storage for reading/writing variables */
+	UPROPERTY(Transient)
 	TScriptInterface<IYarnVariableStorage> VariableStorage;
 
-	/**
+	 /**
 	 * Expand substitutions in a string.
 	 * @param TemplateString The string with {0}, {1} placeholders.
 	 * @param Substitutions The values to substitute.
@@ -274,7 +280,6 @@ private:
 	/** The saliency candidates */
 	TArray<FYarnSaliencyCandidate> SaliencyCandidates;
 
-	/** Maximum call stack depth for detours (prevents infinite recursion) */
 	static constexpr int32 MaxCallStackDepth = 100;
 
 	/** Re-entrancy guard - true when Continue() is executing */
@@ -302,7 +307,7 @@ private:
 	FYarnValue Pop();
 
 	/** Peek at the top of the stack */
-	const FYarnValue& Peek() const;
+	FYarnValue Peek() const;
 
 	/** Pop multiple string values */
 	TArray<FString> PopStrings(int32 Count);

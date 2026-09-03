@@ -107,7 +107,10 @@ FYarnLocalizationExportResult UYarnLocalizationExportLibrary::ExportStringsToCSV
 
         if (Options.bIncludeTags)
         {
-            LineData.Tags = TEXT("");
+            if (const FString* Metadata = YarnProject->LineMetadata.Find(LineID))
+            {
+                LineData.Tags = *Metadata;
+            }
         }
 
         Lines.Add(LineData);
@@ -156,7 +159,10 @@ FYarnLocalizationExportResult UYarnLocalizationExportLibrary::ExportStringsToCSV
         Result.LineCount++;
     }
 
-    bool bSaved = FFileHelper::SaveStringToFile(CSVContent, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    const FFileHelper::EEncodingOptions Encoding = Options.bIncludeUTF8BOM
+        ? FFileHelper::EEncodingOptions::ForceUTF8
+        : FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM;
+    bool bSaved = FFileHelper::SaveStringToFile(CSVContent, *FilePath, Encoding);
 
     if (bSaved)
     {

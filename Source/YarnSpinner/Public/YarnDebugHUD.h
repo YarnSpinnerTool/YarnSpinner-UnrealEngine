@@ -30,7 +30,7 @@ class UVerticalBox;
 class UScrollBox;
 class UBorder;
 
-/**
+ /**
  * Entry in the dialogue execution history.
  */
 USTRUCT(BlueprintType)
@@ -59,15 +59,13 @@ struct YARNSPINNER_API FYarnDebugHistoryEntry
     float Timestamp = 0.0f;
 };
 
-/**
+ /**
  * Debug widget that displays current dialogue state.
- *
  * Shows:
  * - Current node name
  * - Current line ID and text
  * - All yarn variables and their values
  * - Execution history (breadcrumb trail)
- *
  * Can be toggled on/off at runtime with a key press.
  */
 UCLASS(BlueprintType, Blueprintable)
@@ -93,7 +91,7 @@ public:
     void ClearHistory();
 
     /** Get all current variables as formatted strings */
-    UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Debug")
+    UFUNCTION(BlueprintPure, Category = "Yarn Spinner|Debug")
     TArray<FString> GetFormattedVariables() const;
 
     /** Get execution history */
@@ -102,7 +100,7 @@ public:
 
     /** The dialogue runner being monitored */
     UPROPERTY(BlueprintReadOnly, Category = "Yarn Spinner|Debug")
-    UYarnDialogueRunner* DialogueRunner;
+    TObjectPtr<UYarnDialogueRunner> DialogueRunner;
 
     /** Maximum history entries to keep */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Debug")
@@ -135,12 +133,10 @@ protected:
     float TimeSinceLastRefresh = 0.0f;
 };
 
-/**
+ /**
  * Component that manages the debug HUD for a dialogue runner.
- *
  * Attach this to the same actor as your dialogue runner.
  * Press the toggle key (default: F3) to show/hide the debug display.
- *
  * The HUD shows:
  * - Current dialogue state (running/stopped)
  * - Current node and line
@@ -172,7 +168,7 @@ public:
     void HideDebugHUD();
 
     /** Check if debug HUD is visible */
-    UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Debug")
+    UFUNCTION(BlueprintPure, Category = "Yarn Spinner|Debug")
     bool IsDebugHUDVisible() const;
 
     /** Log a line to the debug history */
@@ -197,7 +193,7 @@ public:
 
     /** The dialogue runner to monitor (auto-detected if on same actor) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Debug")
-    UYarnDialogueRunner* DialogueRunner;
+    TObjectPtr<UYarnDialogueRunner> DialogueRunner;
 
     /** Widget class to use for the debug display */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Debug")
@@ -221,7 +217,7 @@ public:
 
 protected:
     UPROPERTY()
-    UYarnDebugWidget* DebugWidget;
+    TObjectPtr<UYarnDebugWidget> DebugWidget;
 
     bool bIsVisible = false;
 

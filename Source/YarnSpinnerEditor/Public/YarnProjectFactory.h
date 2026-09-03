@@ -20,13 +20,13 @@
 #include "CoreMinimal.h"
 #include "Factories/Factory.h"
 #include "EditorReimportHandler.h"
+#include "YarnProtobufParser.h"
 #include "YarnProjectFactory.generated.h"
 
 class UYarnProject;
 
-/**
+ /**
  * Factory for importing .yarnproject files.
- *
  * This factory handles:
  * - Importing .yarnproject files
  * - Calling ysc to compile the yarn scripts
@@ -52,7 +52,9 @@ public:
 	virtual EReimportResult::Type Reimport(UObject* Obj) override;
 
 private:
-	/**
+	bool ImportProjectData(UYarnProject* YarnProject, const FString& SourcePath);
+
+	 /**
 	 * Compile a yarn project using ysc.
 	 * @param ProjectPath Path to the .yarnproject file.
 	 * @param OutCompiledPath Output path to the .yarnc file.
@@ -65,14 +67,14 @@ private:
 	bool CompileYarnProject(const FString& ProjectPath, FString& OutCompiledPath, FString& OutLinesPath,
 		FString& OutMetadataPath, TArray<struct FYarnProjectDiagnostic>& OutDiagnostics, FString& OutError);
 
-	/**
+	 /**
 	 * Parse compiler diagnostics from ysc console output.
 	 * @param CompilerOutput The combined stdout/stderr text from ysc.
 	 * @param OutDiagnostics Parsed diagnostics with source locations where available.
 	 */
 	static void ParseCompilerDiagnostics(const FString& CompilerOutput, TArray<struct FYarnProjectDiagnostic>& OutDiagnostics);
 
-	/**
+	 /**
 	 * Parse a compiled .yarnc file.
 	 * @param CompiledPath Path to the .yarnc file.
 	 * @param OutProgram Output program data.
@@ -81,7 +83,7 @@ private:
 	 */
 	bool ParseCompiledProgram(const FString& CompiledPath, struct FYarnProgram& OutProgram, FString& OutError);
 
-	/**
+	 /**
 	 * Parse a lines CSV file.
 	 * @param LinesPath Path to the lines CSV.
 	 * @param OutStringTable Output string table.
@@ -90,7 +92,7 @@ private:
 	 */
 	bool ParseLinesCSV(const FString& LinesPath, TMap<FString, FString>& OutStringTable, FString& OutError);
 
-	/**
+	 /**
 	 * Parse a metadata CSV file.
 	 * @param MetadataPath Path to the metadata CSV.
 	 * @param OutMetadata Output metadata table.
@@ -99,13 +101,13 @@ private:
 	 */
 	bool ParseMetadataCSV(const FString& MetadataPath, TMap<FString, FString>& OutMetadata, FString& OutError);
 
-	/**
+	 /**
 	 * Get the path to the ysc executable.
 	 * @return The path to ysc.
 	 */
 	FString GetYscPath() const;
 
-	/**
+	 /**
 	 * Parse the .yarnproject JSON file for localization settings.
 	 * Loads baseLanguage and localisation CSV files.
 	 * @param ProjectPath Path to the .yarnproject file.
@@ -117,7 +119,7 @@ private:
 	bool ParseYarnProjectLocalization(const FString& ProjectPath, const FString& ProjectDir,
 		UYarnProject* OutYarnProject, FString& OutError);
 
-	/**
+	 /**
 	 * Parse a localization CSV file into a string map.
 	 * @param CSVPath Path to the CSV file.
 	 * @param OutStrings Output string map (line ID -> text).
@@ -126,53 +128,5 @@ private:
 	 */
 	bool ParseLocalizationCSV(const FString& CSVPath, TMap<FString, FString>& OutStrings, FString& OutError);
 
-	/**
-	 * Parse a single CSV line, handling quoted fields.
-	 * @param Line The CSV line to parse.
-	 * @param OutFields Output array of field values.
-	 */
-	static void ParseCSVLine(const FString& Line, TArray<FString>& OutFields);
-};
-
-/**
- * Lightweight protobuf parser for Yarn Spinner compiled files.
- */
-class YARNSPINNEREDITOR_API FYarnProtobufParser
-{
-public:
-	FYarnProtobufParser(const TArray<uint8>& InData);
-
-	/** Parse a Yarn Program from the data */
-	bool ParseProgram(struct FYarnProgram& OutProgram, FString& OutError);
-
-private:
-	const TArray<uint8>& Data;
-	int32 Position;
-
-	/** Read a varint from the data */
-	uint64 ReadVarint();
-
-	/** Read a fixed 32-bit value */
-	uint32 ReadFixed32();
-
-	/** Read a fixed 64-bit value */
-	uint64 ReadFixed64();
-
-	/** Read a length-prefixed string */
-	FString ReadString();
-
-	/** Read a length-prefixed bytes */
-	TArray<uint8> ReadBytes();
-
-	/** Skip a field of the given wire type */
-	void SkipField(int32 WireType);
-
-	/** Parse a Node message */
-	bool ParseNode(struct FYarnNode& OutNode);
-
-	/** Parse an Instruction message */
-	bool ParseInstruction(struct FYarnInstruction& OutInstruction);
-
-	/** Parse an Operand message */
-	bool ParseOperand(struct FYarnValue& OutValue);
+	static void ParseCSVRecords(const FString& Content, TArray<TArray<FString>>& OutRecords);
 };

@@ -20,21 +20,17 @@
 // ============================================================================
 // YarnVariableStorage.h
 // ============================================================================
-//
 // Variable storage is where yarn variables ($variableName) are kept. The
 // dialogue runner uses this to get and set variables during execution.
-//
 // Blueprint users:
 //   - Use the default in-memory storage (created automatically)
 //   - Bind to OnVariableChanged event for notifications
 //   - Use AddStringChangeListener/etc for specific variable callbacks
 //   - Implement IYarnSmartVariableEvaluator for computed variables
-//
 // C++ users:
 //   - Can implement IYarnVariableStorage for custom storage
 //   - Can use UYarnInMemoryVariableStorage's GetAllVariables/SetAllVariables
 //     for serialisation
-//
 // The default in-memory storage does NOT persist across sessions. For save
 // games, use GetAllVariables to serialise and SetAllVariables to restore.
 
@@ -67,25 +63,19 @@ DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnYarnBoolVariableChanged, const FString&, V
 // ============================================================================
 // IYarnGameSmartVariableEvaluator
 // ============================================================================
-//
 // Game smart variables are computed on-the-fly rather than stored. For example,
 // you might want $player_health to always return the current health value
 // from your game systems, rather than having to manually update a yarn variable.
-//
 // This is different from the compiled expression evaluator in YarnSmartVariables.h;
 // this interface is for binding live game state to yarn variables.
 
-/**
+ /**
  * Interface for game smart variable evaluators.
- *
  * Implement this to provide computed variables that derive their values
  * from game state rather than being stored directly.
- *
  * Example: $player_health could return Character->GetHealth()
- *
  * Register your evaluator with:
  *   VariableStorage->RegisterSmartVariableEvaluator(MyEvaluator)
- *
  * For the compiled expression evaluator, see IYarnSmartVariableEvaluator in
  * YarnSmartVariables.h.
  */
@@ -100,12 +90,10 @@ class YARNSPINNER_API IYarnGameSmartVariableEvaluator
 	GENERATED_BODY()
 
 public:
-	/**
+	 /**
 	 * get the value of a smart variable.
-	 *
 	 * called when yarn reads a variable. if this evaluator handles the
 	 * variable, compute and return the value.
-	 *
 	 * @param VariableName the name of the variable being requested.
 	 * @param OutValue the computed value to return.
 	 * @return true if this evaluator handles the variable.
@@ -113,12 +101,10 @@ public:
 	UFUNCTION(BlueprintNativeEvent, Category = "Yarn Spinner|Smart Variables")
 	bool GetValue(const FString& VariableName, FYarnValue& OutValue);
 
-	/**
+	 /**
 	 * check if this evaluator can provide a value for the given variable.
-	 *
 	 * called during variable storage lookup to determine if this evaluator
 	 * should be consulted for the variable.
-	 *
 	 * @param VariableName the variable name to check.
 	 * @return true if this evaluator handles the variable.
 	 */
@@ -130,7 +116,7 @@ public:
 // FYarnVariableListenerHandle
 // ============================================================================
 
-/**
+ /**
  * handle returned when registering a variable change listener.
  * store this handle and pass it to RemoveChangeListener when you're done.
  */
@@ -152,16 +138,13 @@ struct YARNSPINNER_API FYarnVariableListenerHandle
 // ============================================================================
 // IYarnVariableStorage
 // ============================================================================
-//
 // The interface that all variable storage implementations must conform to.
 // The dialogue runner uses this to get and set variables during execution.
-//
 // To implement your own storage (e.g., backed by a database or integrated
 // with your save system), implement this interface on a UObject.
 
-/**
+ /**
  * Interface for Yarn Spinner variable storage.
- *
  * Implement this interface to provide custom variable storage, e.g.:
  *   - Persistent storage that survives game sessions
  *   - Cloud-synced storage
@@ -182,7 +165,7 @@ public:
 	// typed setters (convenience methods)
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * set a variable to a string value.
 	 * @param VariableName the variable name (must start with $).
 	 * @param Value the string value to set.
@@ -190,7 +173,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Yarn Spinner|Variables")
 	void SetString(const FString& VariableName, const FString& Value);
 
-	/**
+	 /**
 	 * set a variable to a number value.
 	 * @param VariableName the variable name (must start with $).
 	 * @param Value the number value to set.
@@ -198,7 +181,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Yarn Spinner|Variables")
 	void SetNumber(const FString& VariableName, float Value);
 
-	/**
+	 /**
 	 * set a variable to a boolean value.
 	 * @param VariableName the variable name (must start with $).
 	 * @param Value the boolean value to set.
@@ -206,7 +189,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Yarn Spinner|Variables")
 	void SetBool(const FString& VariableName, bool Value);
 
-	/**
+	 /**
 	 * set a variable from a FYarnValue (generic setter).
 	 * @param VariableName the variable name (must start with $).
 	 * @param Value the value to set.
@@ -218,7 +201,7 @@ public:
 	// getters
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * try to get the value of a variable.
 	 * @param VariableName the variable name to look up.
 	 * @param OutValue the value, if found.
@@ -227,7 +210,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Yarn Spinner|Variables")
 	bool TryGetValue(const FString& VariableName, FYarnValue& OutValue);
 
-	/**
+	 /**
 	 * check if a variable exists in storage.
 	 * @param VariableName the variable name to check.
 	 * @return true if the variable exists.
@@ -239,14 +222,14 @@ public:
 	// storage management
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * remove all variables from storage.
 	 * useful for starting a new game.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Yarn Spinner|Variables")
 	void Clear();
 
-	/**
+	 /**
 	 * set the yarn project, allowing access to initial values.
 	 * called by the dialogue runner when setting up.
 	 * @param Project the yarn project to use.
@@ -257,43 +240,36 @@ public:
 	// smart variable evaluation
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * Get the smart variable evaluator for this storage.
 	 * Used for evaluating compiled smart variable nodes.
-	 *
 	 * The dialogue runner sets this to itself when it creates/configures storage.
-	 *
 	 * @return The smart variable evaluator, or nullptr if not set.
 	 */
 	virtual IYarnSmartVariableEvaluator* GetSmartVariableEvaluator() const { return nullptr; }
 
-	/**
+	 /**
 	 * Set the smart variable evaluator for this storage.
 	 * Typically called by the dialogue runner with itself.
-	 *
 	 * @param Evaluator The smart variable evaluator to use.
 	 */
-	virtual void SetSmartVariableEvaluator(IYarnSmartVariableEvaluator* Evaluator) {}
+	virtual void SetSmartVariableEvaluator(IYarnSmartVariableEvaluator* Evaluator, UObject* EvaluatorOwner = nullptr) {}
 };
 
 // ============================================================================
 // UYarnInMemoryVariableStorage
 // ============================================================================
-//
 // The default variable storage implementation. Stores variables in memory
 // (a TMap). Variables are lost when the game exits.
-//
 // To persist variables across sessions:
 //   1. Call GetAllVariables() to get maps of all variables
 //   2. Save those maps to your save game
 //   3. On load, call SetAllVariables() to restore them
 
-/**
+ /**
  * In-memory variable storage component.
- *
  * Stores variables in memory as a TMap. Variables are lost when the game
  * exits unless you serialise them yourself.
- *
  * Features:
  *   - OnVariableChanged event for monitoring all changes
  *   - Typed change listeners for specific variables
@@ -321,13 +297,13 @@ public:
 	virtual void Clear_Implementation() override;
 	virtual void SetYarnProject(UYarnProject* Project) override;
 	virtual IYarnSmartVariableEvaluator* GetSmartVariableEvaluator() const override;
-	virtual void SetSmartVariableEvaluator(IYarnSmartVariableEvaluator* Evaluator) override;
+	virtual void SetSmartVariableEvaluator(IYarnSmartVariableEvaluator* Evaluator, UObject* EvaluatorOwner = nullptr) override;
 
 	// ------------------------------------------------------------------------
 	// change notification
 	// ------------------------------------------------------------------------
 
-	/**
+	 /**
 	 * event fired when any variable changes.
 	 * bind to this in blueprints to monitor variable changes.
 	 */
@@ -340,7 +316,7 @@ public:
 	// these let you listen for changes to specific variables, with the value
 	// already converted to the expected type. useful in blueprints.
 
-	/**
+	 /**
 	 * add a listener for changes to a specific string variable.
 	 * the callback receives the variable name and new string value.
 	 * @param VariableName the variable name to listen for (must start with $).
@@ -350,7 +326,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Variables|Listeners")
 	FYarnVariableListenerHandle AddStringChangeListener(const FString& VariableName, FOnYarnStringVariableChanged Callback);
 
-	/**
+	 /**
 	 * add a listener for changes to a specific number variable.
 	 * the callback receives the variable name and new number value.
 	 * @param VariableName the variable name to listen for (must start with $).
@@ -360,7 +336,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Variables|Listeners")
 	FYarnVariableListenerHandle AddNumberChangeListener(const FString& VariableName, FOnYarnNumberVariableChanged Callback);
 
-	/**
+	 /**
 	 * add a listener for changes to a specific bool variable.
 	 * the callback receives the variable name and new bool value.
 	 * @param VariableName the variable name to listen for (must start with $).
@@ -370,7 +346,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Variables|Listeners")
 	FYarnVariableListenerHandle AddBoolChangeListener(const FString& VariableName, FOnYarnBoolVariableChanged Callback);
 
-	/**
+	 /**
 	 * remove a previously registered change listener.
 	 * @param Handle the handle returned from Add*ChangeListener.
 	 */
@@ -383,7 +359,7 @@ public:
 	// smart variables are computed on-the-fly rather than stored. see
 	// IYarnSmartVariableEvaluator above.
 
-	/**
+	 /**
 	 * register a game smart variable evaluator.
 	 * the evaluator will be consulted for variables it handles.
 	 * @param Evaluator the evaluator to register.
@@ -391,7 +367,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Smart Variables")
 	void RegisterSmartVariableEvaluator(TScriptInterface<IYarnGameSmartVariableEvaluator> Evaluator);
 
-	/**
+	 /**
 	 * unregister a game smart variable evaluator.
 	 * @param Evaluator the evaluator to unregister.
 	 */
@@ -404,7 +380,7 @@ public:
 	// use these for save games. call GetAllVariables to save, SetAllVariables
 	// to restore.
 
-	/**
+	 /**
 	 * get all variables as separate maps for serialisation.
 	 * splits by type for cleaner save game structures.
 	 * @param OutFloats output map of float variables.
@@ -418,7 +394,7 @@ public:
 		TMap<FString, bool>& OutBools
 	) const;
 
-	/**
+	 /**
 	 * set all variables from maps (for deserialisation).
 	 * use this to restore variables from a save game.
 	 * @param Floats map of float variables.
@@ -434,7 +410,7 @@ public:
 		bool bClearFirst = true
 	);
 
-	/**
+	 /**
 	 * get a debug string listing all current variables.
 	 * useful for debugging in the editor or output log.
 	 * @return a formatted string of all variables and their values.
@@ -442,7 +418,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Variables")
 	FString GetDebugString() const;
 
-	/**
+	 /**
 	 * get all variables as a single map of FYarnValue.
 	 * useful for iteration and generic variable access.
 	 * @param OutVariables output map of all variables.
@@ -463,7 +439,7 @@ protected:
 	UPROPERTY()
 	TWeakObjectPtr<UYarnProject> YarnProject;
 
-	/**
+	 /**
 	 * validate that a variable name is correctly formatted.
 	 * yarn variables must start with $ (e.g., $player_name).
 	 * @param VariableName the variable name to check.
@@ -471,7 +447,7 @@ protected:
 	 */
 	bool ValidateVariableName(const FString& VariableName) const;
 
-	/**
+	 /**
 	 * called when a variable value changes.
 	 * fires OnVariableChanged and typed listeners.
 	 * override in subclasses to add custom notification behaviour.
@@ -528,7 +504,24 @@ private:
 	 */
 	IYarnSmartVariableEvaluator* CompiledSmartVariableEvaluator = nullptr;
 
-	/**
+	TWeakObjectPtr<UObject> CompiledSmartVariableEvaluatorOwner;
+
+	bool bEvaluatorOwnerProvided = false;
+
+	IYarnSmartVariableEvaluator* GetActiveSmartVariableEvaluator() const
+	{
+		if (!CompiledSmartVariableEvaluator)
+		{
+			return nullptr;
+		}
+		if (bEvaluatorOwnerProvided && !CompiledSmartVariableEvaluatorOwner.IsValid())
+		{
+			return nullptr;
+		}
+		return CompiledSmartVariableEvaluator;
+	}
+
+	 /**
 	 * try to get value from game smart variable evaluators.
 	 * checks each registered evaluator in order.
 	 */

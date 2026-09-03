@@ -23,7 +23,7 @@ Visit the [documentation](https://docs.yarnspinner.dev/yarn-spinner-for-unreal/u
 The plugin needs `ysc` (the Yarn Spinner Console) to compile your `.yarn` files. Install the required version of it globally with:
 
 ```
-`dotnet tool install YarnSpinner.Console --global --version 3.1.0-alpha1`
+`dotnet tool install YarnSpinner.Console --global --version 3.2.2`
 ```
 
 The editor plugin will find `ysc` automatically if it's on your PATH or in a standard dotnet tools location (`~/.dotnet/tools/`).
@@ -72,7 +72,7 @@ Here's the minimal setup:
 
 4. **Add a `UYarnOptionsPresenter` component.** This handles showing dialogue choices. Create an option widget blueprint using `UYarnOptionWidget` as the base class, and assign it to `OptionWidgetClass`.
 
-5. **Wire the presenters to the runner.** In the Details panel on the `UYarnDialogueRunner`, add your presenter components to the `DialoguePresenters` array.
+5. **Wire the presenters to the runner.** In the Details panel on the `UYarnDialogueRunner`, add your presenter components to the **Dialogue Presenters** array (the property is named `DialoguePresenterReferences` in code). Each entry is a component picker: choose the actor, then the presenter component on it. If the picker won't offer a component (it can be unreliable for components added in a Blueprint), add the presenter at runtime instead: on Begin Play, add it to the runner's `DialoguePresenters` array from Blueprint or C++.
 
 ## Start Dialogue
 
@@ -132,7 +132,17 @@ Create a Blueprint with functions named `play_sound` and `shake_camera`. Paramet
 
 The runner auto-discovers functions matching command names. No string parsing required.
 
-You can also bind to the **OnUnhandledCommand** event on the dialogue runner. It fires with the full command text whenever a command isn't handled by any registered handler -- useful as a catch-all.
+If a handler function returns a `bool` and returns `true`, the command blocks: dialogue waits until you call `Complete Blocking Command` on the runner. Return `false` (or use a `void` function) for commands that finish immediately.
+
+Commands can also target an actor in the level by name. If no handler object has a matching function, the runner looks for an actor whose name (or editor label) matches the command's first argument, then calls the function named after the command on that actor or its components, passing the remaining arguments:
+
+```yarn
+<<walk Guard destination_market>>
+```
+
+This finds the actor named `Guard` and calls its `walk` function with `"destination_market"`.
+
+You can also bind to the **OnUnhandledCommand** event on the dialogue runner. It fires with the full command text whenever a command isn't handled by any registered handler. By default dialogue logs an error and continues past an unhandled command; set `Continue On Unhandled Command` to false on the runner if you want dialogue to pause until you call `Continue`.
 
 ### C++ Lambda Registration
 
@@ -187,6 +197,21 @@ Use them in Yarn expressions:
 
 You have {format("{0:F0}", player_health())} health remaining.
 ```
+
+## Editor Autocomplete (YSLS)
+
+The plugin writes a `.ysls.json` file next to each `.yarnproject`. The Yarn Spinner VS Code extension reads it to offer autocomplete and validation for your custom commands and functions while you write dialogue.
+
+The file regenerates automatically when a Yarn project imports or reimports, after a Blueprint compiles, and after a C++ hot reload. To regenerate by hand, right-click a Yarn Project asset and choose **Generate YSLS File**.
+
+Two kinds of registration are discovered:
+
+- C++ `UFUNCTION`s marked with the `YarnCommand` or `YarnFunction` meta specifier. These entries include parameter names, types, default values, and the function's doc comment.
+- `Register Command Handler`, `Register Blocking Command Handler`, and `Register Function Handler` nodes in Blueprints, when the name pin is a literal string. These entries are name-only, since the handler signature can't be inspected.
+
+Commands registered with C++ lambdas (`AddCommandHandler`) aren't visible to the scan. If you want them in autocomplete, mark a `UFUNCTION` with `meta = (YarnCommand = "name")` and register it with `RegisterCommandsFromObject` instead.
+
+`RegisterCommandsFromObject` works in packaged builds too: UFUNCTION metadata doesn't ship in them, so the editor bakes the discovered registrations into `Config/DefaultGame.ini` (the Yarn Spinner Command Registry project settings) whenever code or Blueprints change, and packaged builds read the baked registry instead. If you edit command metadata and package without opening the editor in between, open the editor once (or reimport a Yarn project) so the registry refreshes.
 
 ## Variables
 
@@ -374,8 +399,14 @@ On `UYarnDialogueRunner` in the Details panel:
 - **Auto Start** -- begin dialogue when the game starts
 - **Run Selected Option As Line** -- after the player picks an option, show it as a line of dialogue before continuing
 - **Saliency Strategy** -- how to pick between competing content candidates (First, Best, BestLeastRecentlyViewed, RandomBestLeastRecentlyViewed)
+- **Allow Option Fallthrough** -- when no presenter can show options, continue past them as though nothing was selected instead of stopping
+- **Continue On Unhandled Command** -- keep dialogue moving after a command nobody handles (turn off to pause until you call `Continue`)
 - **Verbose Logging** -- log all VM execution to the output log for debugging
 - **Command Handler Objects** -- array of objects with functions that match command names
+
+The default line provider is `UYarnBuiltinLineProvider`, which reads the localisations imported from your `.yarnproject`. Two alternatives ship with the plugin: `UYarnStringTableLineProvider` looks lines up in an Unreal String Table (keyed by line ID), and `UYarnCultureAwareLineProvider` maps cultures to separate string tables and follows the active culture. Assign either to the runner's **Line Provider** to use Unreal's own localisation pipeline instead.
+
+For per-letter typewriter presentation with `[pause]` and other action markers processed mid-line, `UYarnLinePresenter` is the text-block-based alternative to `UYarnWidgetPresenter`; pair it with `UYarnOptionsPresenter` for choices.
 
 On `UYarnDialoguePresenter`:
 
@@ -457,7 +488,7 @@ public:
 };
 ```
 
-Register it the same way: add it to the `DialoguePresenters` array on the dialogue runner.
+Register it the same way: add it to the **Dialogue Presenters** (`DialoguePresenterReferences`) array in the Details panel, or to the runner's `DialoguePresenters` array at runtime.
 
 ### Custom Option Widgets
 

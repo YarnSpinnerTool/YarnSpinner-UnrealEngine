@@ -19,17 +19,16 @@
 
 #include "CoreMinimal.h"
 #include "YarnDialoguePresenter.h"
-#include "Components/AudioComponent.h"
-#include "Sound/SoundBase.h"
 #include "YarnVoiceOverPresenter.generated.h"
+
+class UAudioComponent;
+class USoundBase;
 
 // ============================================================================
 // Voice-over presenter - plays audio clips for dialogue lines
 // ============================================================================
-//
 // This is an ActorComponent that handles playing voice-over audio clips
 // synchronised with dialogue lines.
-//
 // BLUEPRINT VS C++ USAGE:
 // - All timing properties are editable in blueprints and the editor.
 // - GetVoiceOverClip is a BlueprintNativeEvent - override it in blueprints
@@ -38,7 +37,6 @@
 //   so you can bind to them in blueprints via the event graph.
 // - The component is BlueprintSpawnable so you can add it dynamically.
 // - For C++ subclasses, override GetVoiceOverClip_Implementation.
-//
 // AUDIO COMPONENT:
 // - If you assign an AudioComponent in the editor, that one is used.
 // - If not, one is created automatically in BeginPlay.
@@ -46,14 +44,12 @@
 //   dialogue audio usually shouldn't be affected by 3D position.
 // - If you want spatialised dialogue, set up your own AudioComponent with
 //   the desired attenuation settings and assign it.
-//
 // TIMING:
 // - WaitTimeBeforeStart: delay before audio starts (good for syncing with
 //   text fade-in or character animation).
 // - WaitTimeAfterComplete: delay after audio ends before signalling done
 //   (gives a natural pause between lines).
 // - FadeOutTimeOnInterrupt: smooth fade when interrupted (avoids audio pop).
-//
 // USAGE:
 // - Use this presenter alongside a text presenter (like UYarnWidgetPresenter).
 // - Add both to the dialogue runner's presenter list.
@@ -64,18 +60,14 @@
 /** Simple delegate for voice-over presenter events (no parameters). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FYarnVoiceOverEvent);
 
-/**
+ /**
  * A dialogue presenter that plays voice-over audio clips for dialogue lines.
- *
  * Handles audio playback with support for pre/post delays, smooth fade-out on
  * interruption, and optional automatic line advancement when audio completes.
- *
  * Override GetVoiceOverClip in blueprints or C++ to provide custom audio
  * lookup logic. The default implementation looks for an "audio:" metadata
  * tag on the line.
- *
  * @see UYarnDialoguePresenter the base presenter class
- * @see AYarnVoiceOverDemo a complete demo actor using this presenter
  */
 UCLASS(ClassGroup = (YarnSpinner), meta = (BlueprintSpawnableComponent), Blueprintable)
 class YARNSPINNER_API UYarnVoiceOverPresenter : public UYarnDialoguePresenter
@@ -84,6 +76,8 @@ class YARNSPINNER_API UYarnVoiceOverPresenter : public UYarnDialoguePresenter
 
 public:
 	UYarnVoiceOverPresenter();
+
+	virtual bool CanHandleOptions() const override { return false; }
 
 	// ========================================================================
 	// UActorComponent interface
@@ -105,6 +99,8 @@ public:
 	virtual void OnDialogueComplete_Implementation() override;
 	virtual void RunLine_Implementation(const FYarnLocalizedLine& Line, bool bCanHurry) override;
 
+	virtual void OnNextLineRequested_Implementation() override;
+
 	/** Preloads audio assets for upcoming lines so playback starts without a hitch. */
 	virtual void OnPrepareForLines_Implementation(const TArray<FString>& LineIDs) override;
 
@@ -112,73 +108,65 @@ public:
 	// configuration - all editable in editor and blueprints
 	// ========================================================================
 
-	/**
+	 /**
 	 * If true, this presenter will request the next line when voice-over
 	 * playback completes. Set to false if you want another presenter (like
 	 * a text presenter) or player input to control line advancement.
-	 *
 	 * Typically you'd have this false and let the text presenter handle it,
 	 * since players might want to read at their own pace regardless of audio.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Over")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Voice Over")
 	bool bEndLineWhenVoiceOverComplete = true;
 
-	/**
+	 /**
 	 * Time in seconds to fade out audio when interrupted (player skips ahead).
 	 * Prevents a jarring audio cut. Set to 0 for instant stop.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Over|Timing", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Voice Over|Timing", meta = (ClampMin = "0.0"))
 	float FadeOutTimeOnInterrupt = 0.05f;
 
-	/**
+	 /**
 	 * Time in seconds to wait before starting audio playback after receiving
 	 * a line. Useful for syncing with text fade-in animations.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Over|Timing", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Voice Over|Timing", meta = (ClampMin = "0.0"))
 	float WaitTimeBeforeStart = 0.0f;
 
-	/**
+	 /**
 	 * Time in seconds to wait after audio completes before signalling done.
 	 * Gives a natural pause between lines. Not applied when interrupted.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Over|Timing", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Yarn Spinner|Voice Over|Timing", meta = (ClampMin = "0.0"))
 	float WaitTimeAfterComplete = 0.0f;
 
-	/**
+	 /**
 	 * The audio component to use for playback. If not assigned, one will be
 	 * created automatically in BeginPlay.
-	 *
 	 * If you want spatialised audio (3D positioning, attenuation), set up
 	 * your own AudioComponent with the desired settings and assign it here.
 	 * The auto-created component is 2D (non-spatialised) by default.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voice Over")
-	UAudioComponent* AudioComponent;
+	UPROPERTY(BlueprintReadWrite, Transient, Category = "Yarn Spinner|Voice Over")
+	TObjectPtr<UAudioComponent> AudioComponent;
 
 	// ========================================================================
 	// audio lookup - override this for custom audio resolution
 	// ========================================================================
 
-	/**
+	 /**
 	 * Get the voice-over audio clip for a line.
-	 *
 	 * BLUEPRINT USAGE:
 	 * Override this in your blueprint to provide custom audio lookup. For
 	 * example, you might look up clips from a data table based on line ID,
 	 * or load them from a specific folder based on character name.
-	 *
 	 * C++ USAGE:
 	 * Override GetVoiceOverClip_Implementation in your subclass.
-	 *
 	 * DEFAULT BEHAVIOUR:
 	 * The default implementation looks for an "audio:" metadata tag on the
-	 * line and loads the asset from that path. If no tag is found, returns
-	 * nullptr (no audio for this line).
-	 *
 	 * @param Line the localised line to get audio for
 	 * @return the audio clip to play, or nullptr if none available
 	 */
-	UFUNCTION(BlueprintNativeEvent, Category = "Voice Over")
+	UFUNCTION(BlueprintNativeEvent, Category = "Yarn Spinner|Voice Over")
 	USoundBase* GetVoiceOverClip(const FYarnLocalizedLine& Line);
 	virtual USoundBase* GetVoiceOverClip_Implementation(const FYarnLocalizedLine& Line);
 
@@ -186,24 +174,28 @@ public:
 	// events - bind to these in blueprints or c++
 	// ========================================================================
 
-	/**
+	 /**
 	 * Called when voice-over playback starts for a line.
 	 * Useful for triggering character lip-sync or animations.
 	 */
-	UPROPERTY(BlueprintAssignable, Category = "Voice Over|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Voice Over|Events")
 	FYarnVoiceOverEvent OnVoiceOverStarted;
 
-	/**
+	 /**
 	 * Called when voice-over playback completes for a line.
 	 * Fires both for natural completion and after fade-out from interruption.
 	 */
-	UPROPERTY(BlueprintAssignable, Category = "Voice Over|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Yarn Spinner|Voice Over|Events")
 	FYarnVoiceOverEvent OnVoiceOverComplete;
 
 protected:
 	// ========================================================================
 	// internal state - not exposed to blueprints
 	// ========================================================================
+
+	USoundBase* ResolveClipFromLocalizedAssetsPath(const FString& LineID);
+
+	FString MakeLocalizedClipAssetPath(const FString& LineID) const;
 
 	/** The current line being presented (stored for logging/debugging). */
 	FYarnLocalizedLine CurrentLine;
@@ -238,6 +230,11 @@ protected:
 
 	/** Starts playing the audio clip. */
 	void StartPlayback(USoundBase* AudioClip);
+
+	void StartPendingPlayback();
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundBase> PendingClip = nullptr;
 
 	/** Called when audio finishes playing naturally. */
 	void OnAudioFinished();

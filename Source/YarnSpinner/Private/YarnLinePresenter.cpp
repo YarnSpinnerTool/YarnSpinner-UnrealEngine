@@ -18,11 +18,16 @@
 #include "YarnLinePresenter.h"
 #include "YarnDialogueRunner.h"
 #include "YarnSpinnerModule.h"
+#include "Components/TextBlock.h"
+#include "Components/PanelWidget.h"
 
 UYarnLinePresenter::UYarnLinePresenter()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+
+	UYarnPauseEventProcessor* DefaultPauseProcessor = CreateDefaultSubobject<UYarnPauseEventProcessor>(TEXT("DefaultPauseProcessor"));
+	ActionMarkupHandlers.Add(DefaultPauseProcessor);
 }
 
 void UYarnLinePresenter::BeginPlay()
@@ -31,21 +36,6 @@ void UYarnLinePresenter::BeginPlay()
 
 	// hide the container at start
 	SetLineContainerVisible(false);
-
-	// set up the action markup registry and auto-register any handler
-	// components on the owning actor ([pause/], markup events, sfx)
-	ActionMarkupRegistry = NewObject<UYarnActionMarkupHandlerRegistry>(this);
-	if (AActor* Owner = GetOwner())
-	{
-		TArray<UActorComponent*> HandlerComponents = Owner->GetComponentsByInterface(UYarnActionMarkupHandler::StaticClass());
-		for (UActorComponent* Component : HandlerComponents)
-		{
-			TScriptInterface<IYarnActionMarkupHandler> Handler;
-			Handler.SetObject(Component);
-			Handler.SetInterface(Cast<IYarnActionMarkupHandler>(Component));
-			ActionMarkupRegistry->RegisterHandler(Handler);
-		}
-	}
 }
 
 void UYarnLinePresenter::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -144,9 +134,12 @@ void UYarnLinePresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, 
 	}
 
 	// let action markup handlers prepare for the line ([pause/] positions etc)
-	if (ActionMarkupRegistry)
+	for (UYarnActionMarkupHandler* Handler : ActionMarkupHandlers)
 	{
-		ActionMarkupRegistry->DispatchPrepareForLine(Line.TextMarkup);
+		if (Handler)
+		{
+			Handler->OnPrepareForLine(this, Line.TextMarkup);
+		}
 	}
 
 	// show the container
@@ -156,9 +149,12 @@ void UYarnLinePresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, 
 	switch (TypewriterMode)
 	{
 	case EYarnTypewriterMode::Instant:
-		if (ActionMarkupRegistry)
+		for (UYarnActionMarkupHandler* Handler : ActionMarkupHandlers)
 		{
-			ActionMarkupRegistry->DispatchLineDisplayBegin(Line.TextMarkup);
+			if (Handler)
+			{
+				Handler->OnLineDisplayBegin(this, Line.TextMarkup);
+			}
 		}
 		ShowFullText();
 		break;
@@ -169,9 +165,12 @@ void UYarnLinePresenter::RunLine_Implementation(const FYarnLocalizedLine& Line, 
 		{
 			LineTextWidget->SetText(FText::GetEmpty());
 		}
-		if (ActionMarkupRegistry)
+		for (UYarnActionMarkupHandler* Handler : ActionMarkupHandlers)
 		{
-			ActionMarkupRegistry->DispatchLineDisplayBegin(Line.TextMarkup);
+			if (Handler)
+			{
+				Handler->OnLineDisplayBegin(this, Line.TextMarkup);
+			}
 		}
 		bIsTypewriting = true;
 		SetComponentTickEnabled(true);
@@ -216,9 +215,12 @@ void UYarnLinePresenter::OnNextLineRequested_Implementation()
 
 void UYarnLinePresenter::NotifyLineWillDismiss()
 {
-	if (ActionMarkupRegistry)
+	for (UYarnActionMarkupHandler* Handler : ActionMarkupHandlers)
 	{
-		ActionMarkupRegistry->DispatchLineWillDismiss();
+		if (Handler)
+		{
+			Handler->OnLineWillDismiss(this);
+		}
 	}
 }
 
@@ -235,9 +237,15 @@ void UYarnLinePresenter::ShowFullText()
 
 	// notify action markup handlers that the line has fully displayed
 	// (only if we actually presented this line, not on shutdown paths)
-	if (ActionMarkupRegistry && (bWasTypewriting || bIsPresentingLine))
+	if (bWasTypewriting || bIsPresentingLine)
 	{
-		ActionMarkupRegistry->DispatchLineDisplayComplete();
+		for (UYarnActionMarkupHandler* Handler : ActionMarkupHandlers)
+		{
+			if (Handler)
+			{
+				Handler->OnLineDisplayComplete(this);
+			}
+		}
 	}
 
 	OnTypewriterComplete.Broadcast();
@@ -307,16 +315,19 @@ void UYarnLinePresenter::UpdateTypewriterText()
 	// reveal until the pause elapses.
 	auto DispatchCharacter = [this](int32 DisplayIndex) -> bool
 	{
-		if (!ActionMarkupRegistry)
-		{
-			return false;
-		}
 		FYarnLineCancellationToken Token = DialogueRunner ? DialogueRunner->GetCurrentCancellationToken() : FYarnLineCancellationToken();
-		float PauseDuration = ActionMarkupRegistry->DispatchCharacterWillAppear(
-			MarkupIndexOffset + DisplayIndex, CurrentLine.TextMarkup, Token);
-		if (PauseDuration > 0.0f)
+		float MaxPauseDuration = 0.0f;
+		for (UYarnActionMarkupHandler* Handler : ActionMarkupHandlers)
 		{
-			PendingPauseTime = PauseDuration;
+			if (Handler)
+			{
+				float PauseDuration = Handler->OnCharacterWillAppear(this, MarkupIndexOffset + DisplayIndex, CurrentLine.TextMarkup, Token);
+				MaxPauseDuration = FMath::Max(MaxPauseDuration, PauseDuration);
+			}
+		}
+		if (MaxPauseDuration > 0.0f)
+		{
+			PendingPauseTime = MaxPauseDuration;
 			return true;
 		}
 		return false;

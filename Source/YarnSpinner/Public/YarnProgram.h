@@ -20,16 +20,13 @@
 // ============================================================================
 // YarnProgram.h
 // ============================================================================
-//
 // WHAT THIS IS:
 // This file defines the compiled Yarn program structure. A UYarnProject asset
 // contains one of these, which holds all the bytecode and data needed to run
 // the dialogue.
-//
 // BLUEPRINT VS C++ USAGE:
 // Most of this is internal - blueprint users interact with UYarnProject.
 // C++ users might access FYarnProgram directly for advanced introspection.
-//
 // STRUCTURE:
 // UYarnProject (the asset you create in editor)
 //   +-- FYarnProgram (the compiled bytecode)
@@ -44,7 +41,7 @@
 // EYarnInstructionType
 // ============================================================================
 
-/**
+ /**
  * The type of a Yarn VM instruction.
  * These map directly to the protobuf instruction types from the compiler.
  * You shouldn't need to interact with these unless you're debugging the VM.
@@ -78,7 +75,7 @@ enum class EYarnInstructionType : uint8
 	SelectSaliencyCandidate
 };
 
-/**
+ /**
  * A single Yarn Spinner instruction.
  */
 USTRUCT()
@@ -139,7 +136,7 @@ struct YARNSPINNER_API FYarnInstruction
 	static FYarnInstruction SelectSaliencyCandidate();
 };
 
-/**
+ /**
  * A header on a Yarn node.
  */
 USTRUCT()
@@ -158,7 +155,7 @@ struct YARNSPINNER_API FYarnHeader
 		: Key(InKey), Value(InValue) {}
 };
 
-/**
+ /**
  * A node in a Yarn program.
  */
 USTRUCT()
@@ -192,27 +189,27 @@ struct YARNSPINNER_API FYarnNode
 	/** Check if a header exists */
 	bool HasHeader(const FString& Key) const;
 
-	/**
+	 /**
 	 * Get the tracking variable name for this node (used by visited()/visited_count()).
 	 * Derived from the "tracking" header if present.
 	 * @return The tracking variable name, or empty string if not set.
 	 */
 	FString GetTrackingVariableName() const;
 
-	/**
+	 /**
 	 * Get the saliency condition variables for this node.
 	 * Used by AddSaliencyCandidateFromNode to evaluate smart variables.
 	 * @return Array of variable names to evaluate for saliency conditions.
 	 */
 	TArray<FString> GetContentSaliencyConditionVariables() const;
 
-	/**
+	 /**
 	 * Get the saliency condition complexity score for this node.
 	 * @return The complexity score (higher = more specific content).
 	 */
 	int32 GetContentSaliencyConditionComplexityScore() const;
 
-	/**
+	 /**
 	 * Get all line IDs referenced by this node.
 	 * Used by PrepareForLinesHandler for pre-loading.
 	 * @return Array of line IDs.
@@ -220,7 +217,7 @@ struct YARNSPINNER_API FYarnNode
 	TArray<FString> GetLineIDs() const;
 };
 
-/**
+ /**
  * A compiled Yarn program.
  * Contains all nodes and initial variable values.
  */
@@ -254,7 +251,7 @@ struct YARNSPINNER_API FYarnProgram
 	/** Get the initial value for a variable */
 	bool TryGetInitialValue(const FString& VariableName, FYarnValue& OutValue) const;
 
-	/**
+	 /**
 	 * Get all line IDs for a specific node.
 	 * Used by PrepareForLinesHandler for pre-loading localisation.
 	 * @param NodeName The name of the node.
@@ -268,16 +265,13 @@ class UAssetImportData;
 // ============================================================================
 // FYarnLocalization
 // ============================================================================
-//
 // Stores the translated strings for a single locale/culture. Each culture
 // (e.g., "de", "fr", "pt-BR") has its own FYarnLocalization in the project.
-//
 // The runtime strings table allows adding translations at runtime without
 // modifying the asset - useful for user-generated content or dynamic text.
 
-/**
+ /**
  * Localisation data for a single culture/language.
- *
  * Contains the translated strings for one locale. The project stores a map
  * of these (culture code -> localisation data).
  */
@@ -287,24 +281,24 @@ struct YARNSPINNER_API FYarnLocalization
 	GENERATED_BODY()
 
 	/** Translated strings for this culture (line ID -> translated text) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Localization")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner|Localisation")
 	TMap<FString, FString> Strings;
 
-	/**
+	 /**
 	 * Runtime-added strings (not persisted to asset).
 	 * These are checked first, allowing runtime overrides.
 	 */
 	TMap<FString, FString> RuntimeStrings;
 
 	/** Path to localised assets directory (relative to .yarnproject) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Localization")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner|Localisation")
 	FString AssetsPath;
 
 	/** The source CSV file this was loaded from (for reimporting) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Localization")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner|Localisation")
 	FString SourceCSVPath;
 
-	/**
+	 /**
 	 * Get localised string, checking runtime table first.
 	 * Runtime strings override persistent strings.
 	 */
@@ -329,7 +323,7 @@ struct YARNSPINNER_API FYarnLocalization
 		return RuntimeStrings.Contains(LineID) || Strings.Contains(LineID);
 	}
 
-	/**
+	 /**
 	 * Add a runtime string (not persisted to asset).
 	 * Useful for user-generated content or dynamic translations.
 	 */
@@ -349,7 +343,6 @@ struct YARNSPINNER_API FYarnLocalization
 // ============================================================================
 // UYarnProject
 // ============================================================================
-//
 // WHAT THIS IS:
 // This is the main asset type for Yarn Spinner. You create one by importing
 // a .yarnproject file into Unreal. It contains:
@@ -357,18 +350,16 @@ struct YARNSPINNER_API FYarnLocalization
 //   - base language strings
 //   - localised strings for other languages
 //   - line metadata
-//
 // BLUEPRINT VS C++ USAGE:
 // Blueprint users:
 //   - assign a UYarnProject to the dialogue runner in the editor
 //   - use GetBaseText/GetLocalizedText for custom text lookup
 //   - use HasNode to check if a node exists before starting
-//
 // C++ users:
 //   - can access Program directly for bytecode introspection
 //   - can access BaseStringTable and Localizations for text lookup
 
-/**
+ /**
  * A diagnostic message produced by the Yarn compiler during import.
  * Warning-severity diagnostics are retained on the project asset so they
  * remain visible after import, matching the Unity importer.
@@ -399,12 +390,10 @@ struct YARNSPINNER_API FYarnProjectDiagnostic
 	FString Message;
 };
 
-/**
+ /**
  * A Yarn project asset.
- *
  * Contains a compiled program and associated localisation data.
  * Created by importing a .yarnproject file into the editor.
- *
  * @see UYarnDialogueRunner which uses this to run dialogue
  */
 UCLASS(BlueprintType)
@@ -417,9 +406,11 @@ public:
 	// Import settings
 	// ========================================================================
 
+#if WITH_EDITORONLY_DATA
 	/** Import data for reimporting from source files (editor only) */
-	UPROPERTY(VisibleAnywhere, Instanced, Category = "Import Settings")
-	UAssetImportData* AssetImportData;
+	UPROPERTY(VisibleAnywhere, Instanced, Category = "Yarn Spinner|Import Settings")
+	TObjectPtr<UAssetImportData> AssetImportData;
+#endif
 
 	// ========================================================================
 	// Compiled program data
@@ -433,32 +424,32 @@ public:
 	// Localisation data
 	// ========================================================================
 
-	/**
+	 /**
 	 * Base language code (e.g., "en", "en-US").
 	 * This is the language of the original Yarn scripts.
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Localization")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner|Localisation")
 	FString BaseLanguage;
 
-	/**
+	 /**
 	 * Base string table containing line text in the base language.
 	 * Maps line ID -> text (e.g., "line:Start-0" -> "Hello, world!").
 	 */
 	UPROPERTY()
 	TMap<FString, FString> BaseStringTable;
 
-	/**
+	 /**
 	 * Per-culture localisations.
 	 * Maps culture code -> localisation data (e.g., "de" -> FYarnLocalization).
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Localization")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Yarn Spinner|Localisation")
 	TMap<FString, FYarnLocalization> Localizations;
 
 	/** Metadata for lines (line ID -> metadata string) */
 	UPROPERTY()
 	TMap<FString, FString> LineMetadata;
 
-	/**
+	 /**
 	 * Diagnostics reported by the Yarn compiler on the most recent import.
 	 * Warnings don't fail the import, but they're kept here so they stay
 	 * visible in the editor after the import completes.
@@ -470,7 +461,7 @@ public:
 	// Node information
 	// ========================================================================
 
-	/**
+	 /**
 	 * List of all node names in the project.
 	 * Useful for creating node selection dropdowns in editor UI.
 	 */
@@ -491,57 +482,57 @@ public:
 	// Blueprint-callable methods
 	// ========================================================================
 
-	/**
+	 /**
 	 * Get the text for a line ID in the base language.
 	 * @param LineID The line ID to look up (e.g., "line:Start-0").
 	 * @return The line text, or empty string if not found.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner")
 	FString GetBaseText(const FString& LineID) const;
 
-	/**
+	 /**
 	 * Get the localised text for a line ID in a specific culture.
 	 * Falls back to base text if the culture or line is not found.
 	 * @param LineID The line ID to look up.
 	 * @param CultureCode The culture code (e.g., "fr", "de", "pt-BR").
 	 * @return The localised text, or base text if not found.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner")
 	FString GetLocalizedText(const FString& LineID, const FString& CultureCode) const;
 
-	/**
+	 /**
 	 * Check if localisation data exists for a specific culture.
 	 * @param CultureCode The culture code to check.
 	 * @return True if localisation exists for this culture.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner")
 	bool HasLocalization(const FString& CultureCode) const;
 
-	/**
+	 /**
 	 * Get all available culture codes that have localisation data.
 	 * Includes the base language.
 	 * @return Array of culture codes (e.g., ["en", "de", "fr"]).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner")
 	TArray<FString> GetAvailableCultures() const;
 
-	/**
+	 /**
 	 * Check if the project contains a node with the given name.
 	 * Useful for validating node names before starting dialogue.
 	 * @param NodeName The node name to check (e.g., "Start", "Chapter1").
 	 * @return True if the node exists.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner")
 	bool HasNode(const FString& NodeName) const;
 
-	/**
+	 /**
 	 * Get the initial value for a variable defined in the Yarn scripts.
 	 * Variables declared with <<declare>> in Yarn have initial values.
 	 * @param VariableName The variable name (must start with $).
 	 * @param OutValue The initial value, if found.
 	 * @return True if the variable has an initial value defined.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	UFUNCTION(BlueprintPure, Category = "Yarn Spinner")
 	bool TryGetInitialValue(const FString& VariableName, FYarnValue& OutValue) const;
 
 	// ========================================================================
@@ -549,7 +540,7 @@ public:
 	// ========================================================================
 
 	virtual void PostInitProperties() override;
-#if WITH_EDITORONLY_DATA
+#if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 };

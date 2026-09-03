@@ -155,7 +155,7 @@ void UYarnDialogueWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	{
 		TypewriterTimer += InDeltaTime;
 
-		float CharTime = 1.0f / TypewriterSpeed;
+		const float CharTime = 1.0f / FMath::Max(TypewriterSpeed, 1.0f);
 		while (TypewriterTimer >= CharTime && CurrentCharIndex < FullDialogueText.Len())
 		{
 			TypewriterTimer -= CharTime;
@@ -367,7 +367,7 @@ void UYarnDialogueWidget::ShowOptions(const TArray<FYarnOption>& Options)
 				[
 					SNew(SButton)
 					.IsEnabled(Option.bIsAvailable)
-					.OnClicked_Lambda([this, i]() { return OnOptionClicked(i); })
+					.OnClicked(FOnClicked::CreateUObject(this, &UYarnDialogueWidget::OnOptionClicked, i))
 					.ContentPadding(FMargin(20, 12))
 					.ButtonColorAndOpacity(FSlateColor(ButtonBgColor))
 					.HAlign(HAlign_Fill)

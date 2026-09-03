@@ -98,6 +98,7 @@ void UYarnCancellationTokenSource::UnlinkFromParents()
 		if (UYarnCancellationTokenSource* Parent = Sub.Parent.Get())
 		{
 			Parent->UnregisterOnCancelled(Sub.Handle);
+			Parent->LinkedChildSources.Remove(this);
 		}
 	}
 	for (const FLinkedSubscription& Sub : ParentHurryUpSubscriptions)
@@ -105,6 +106,7 @@ void UYarnCancellationTokenSource::UnlinkFromParents()
 		if (UYarnCancellationTokenSource* Parent = Sub.Parent.Get())
 		{
 			Parent->UnregisterOnHurryUp(Sub.Handle);
+			Parent->LinkedChildSources.Remove(this);
 		}
 	}
 	ParentCancelSubscriptions.Reset();
@@ -333,6 +335,8 @@ UYarnCancellationTokenSource* UYarnCancellationTokenSource::CreateLinkedTokenSou
 			// permanently uncancelled, so it contributes nothing.
 			continue;
 		}
+
+		Parent->LinkedChildSources.AddUnique(Linked);
 
 		if (bLinkCancellation)
 		{
