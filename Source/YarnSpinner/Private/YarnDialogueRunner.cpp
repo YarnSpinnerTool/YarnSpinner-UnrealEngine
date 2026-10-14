@@ -315,6 +315,28 @@ void UYarnDialogueRunner::SetSaliencyStrategy(TScriptInterface<IYarnSaliencyStra
 	}
 }
 
+bool UYarnDialogueRunner::HasSalientContent(const FString& NodeGroup)
+{
+	if (!Instance)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: HasSalientContent('%s') called before BeginPlay"), *NodeGroup);
+		return false;
+	}
+	return Instance->HasSalientContent(NodeGroup);
+}
+
+TArray<FYarnSaliencyCandidate> UYarnDialogueRunner::GetSaliencyOptionsForNodeGroup(const FString& NodeGroup)
+{
+	TArray<FYarnSaliencyCandidate> Candidates;
+	if (!Instance)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: GetSaliencyOptionsForNodeGroup('%s') called before BeginPlay"), *NodeGroup);
+		return Candidates;
+	}
+	Instance->GetSaliencyOptionsForNodeGroup(NodeGroup, Candidates);
+	return Candidates;
+}
+
 FYarnLineCancellationToken UYarnDialogueRunner::GetCurrentCancellationToken()
 {
 	return Instance ? Instance->GetCurrentCancellationToken() : FYarnLineCancellationToken();

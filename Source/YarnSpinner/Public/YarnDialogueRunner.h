@@ -465,6 +465,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Saliency")
 	TScriptInterface<IYarnSaliencyStrategy> GetSaliencyStrategy() const { return Instance ? Instance->GetActiveSaliencyStrategy() : TScriptInterface<IYarnSaliencyStrategy>(); }
 
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Saliency")
+	bool HasSalientContent(const FString& NodeGroup);
+
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner|Saliency")
+	TArray<FYarnSaliencyCandidate> GetSaliencyOptionsForNodeGroup(const FString& NodeGroup);
+
 	// ========================================================================
 	// IYarnSmartVariableEvaluator implementation
 	// ========================================================================

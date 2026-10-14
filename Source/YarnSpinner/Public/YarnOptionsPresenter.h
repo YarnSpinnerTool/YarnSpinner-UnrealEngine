@@ -219,6 +219,7 @@ public:
 	virtual void RunLine_Implementation(const FYarnLocalizedLine& Line, bool bCanHurry) override;
 	virtual void RunOptions_Implementation(const FYarnOptionSet& Options) override;
 	virtual void OnHurryUpRequested_Implementation() override;
+	virtual void OnOptionsHurryUpRequested_Implementation() override;
 
 	// ========================================================================
 	// Widget Configuration

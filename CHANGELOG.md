@@ -81,6 +81,12 @@ Alpha 9 reworks a few parts of how the plugin fits into Unreal, guided by commun
   the project's nodes in the Details panel instead of a text box. Feed one to 
   the new Start Dialogue From Reference. Matches teh node picker the Godot and 
   Unity versions have.
+- **Has Salient Content** and **Get Saliency Options For Node Group** on the
+  dialogue runner, matching the Unity names. They check a node group's
+  `when:` conditions with the runner's own functions, including `not`,
+  `once`, `<` and `and`, so you don't need to pass anything else in. Both
+  work from Blueprints and C++. An unknown node name logs a warning and
+  gives back false or an empty list.
 
 ### Fixed
 
@@ -153,6 +159,13 @@ Alpha 9 reworks a few parts of how the plugin fits into Unreal, guided by commun
 - Looking a node up by name is case sensitive, so `Has Node` and `Start
   Dialogue` no longer accept "start" for a node called "Start". Unreal's
   string maps ignore case, sorry.
+- The options presenter now skips its fade-in when options hurry-up is
+  requested, so the line advancer's Option Hurry Up Key and Request Hurry
+  Up Option work. It only listened for line hurry-up before.
+- Calling Complete Blocking Command from inside a command handler object or
+  actor function that returns true no longer hangs the dialogue. The
+  completion arrived before the runner marked the command as pending, so it
+  was ignored. Registered blocking handlers already handled this.
 
 ### Changed
 

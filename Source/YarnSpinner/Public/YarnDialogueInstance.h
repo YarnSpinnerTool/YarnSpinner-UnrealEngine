@@ -135,6 +135,9 @@ public:
 	void SetSaliencyStrategy(TScriptInterface<IYarnSaliencyStrategy> InStrategy);
 	TScriptInterface<IYarnSaliencyStrategy> GetActiveSaliencyStrategy() const { return ActiveSaliencyStrategy; }
 
+	bool GetSaliencyOptionsForNodeGroup(const FString& NodeGroup, TArray<FYarnSaliencyCandidate>& OutCandidates);
+	bool HasSalientContent(const FString& NodeGroup);
+
 	// ========================================================================
 	// ========================================================================
 
@@ -170,6 +173,10 @@ private:
 
 	/** True while a blocking command is holding the dialogue. */
 	bool bBlockingCommandPending = false;
+
+	bool bDispatchingReflectedCommand = false;
+
+	bool bReflectedCommandCompletedEarly = false;
 
 	/** Registered yarn functions (function name -> implementation) */
 	TMap<FString, TFunction<FYarnValue(const TArray<FYarnValue>&)>, FDefaultSetAllocator,

@@ -210,6 +210,81 @@ bool FYarnNameCaseTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FYarnSaliencyQueryTest, "YarnSpinner.Saliency.RunnerQueriesUseBuiltInOperators",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FYarnSaliencyQueryTest::RunTest(const FString& Parameters)
+{
+	FTestWorldWrapper WorldWrapper;
+	if (!WorldWrapper.CreateTestWorld(EWorldType::Game) || !WorldWrapper.BeginPlayInTestWorld())
+	{
+		WorldWrapper.ForwardErrorMessages(this);
+		return false;
+	}
+
+	AActor* Actor = WorldWrapper.GetTestWorld()->SpawnActor<AActor>();
+	UYarnInMemoryVariableStorage* Storage = NewObject<UYarnInMemoryVariableStorage>(Actor);
+	Storage->RegisterComponent();
+
+	UYarnDialogueRunner* Runner = NewObject<UYarnDialogueRunner>(Actor);
+	Runner->VariableStorage = TScriptInterface<IYarnVariableStorage>(Storage);
+	Runner->RegisterComponent();
+
+	UYarnProject* Project = NewObject<UYarnProject>();
+
+	FYarnNode Hub;
+	Hub.Name = TEXT("Greet");
+	Hub.Headers.Add(FYarnHeader(TEXT("$Yarn.Internal.NodeGroupHub"), TEXT("Greet")));
+	Project->Program.Nodes.Add(Hub.Name, Hub);
+
+	const FString ConditionName = TEXT("$Yarn.Internal.Greet.Stranger.Condition0");
+	FYarnNode Member;
+	Member.Name = TEXT("Greet.Stranger");
+	Member.Headers.Add(FYarnHeader(TEXT("$Yarn.Internal.NodeGroup"), TEXT("Greet")));
+	Member.Headers.Add(FYarnHeader(TEXT("$Yarn.Internal.ContentSaliencyVariables"), ConditionName));
+	Member.Headers.Add(FYarnHeader(TEXT("$Yarn.Internal.ContentSaliencyComplexity"), TEXT("1")));
+	Project->Program.Nodes.Add(Member.Name, Member);
+
+	FYarnNode Condition;
+	Condition.Name = ConditionName;
+	Condition.Instructions.Add(FYarnInstruction::PushVariable(TEXT("$met")));
+	Condition.Instructions.Add(FYarnInstruction::PushFloat(1.0f));
+	Condition.Instructions.Add(FYarnInstruction::CallFunction(TEXT("Bool.Not")));
+	Condition.Instructions.Add(FYarnInstruction::Stop());
+	Project->Program.Nodes.Add(Condition.Name, Condition);
+
+	FYarnNode Plain;
+	Plain.Name = TEXT("Shop");
+	Project->Program.Nodes.Add(Plain.Name, Plain);
+
+	Runner->SetYarnProject(Project);
+
+	IYarnVariableStorage::Execute_SetValue(Storage, TEXT("$met"), FYarnValue(false));
+	TestTrue(TEXT("a condition using 'not' passes before dialogue starts"), Runner->HasSalientContent(TEXT("Greet")));
+	TArray<FYarnSaliencyCandidate> Candidates = Runner->GetSaliencyOptionsForNodeGroup(TEXT("Greet"));
+	TestEqual(TEXT("the group has one member"), Candidates.Num(), 1);
+	if (Candidates.Num() == 1)
+	{
+		TestEqual(TEXT("the member is reported by name"), Candidates[0].ContentID, FString(TEXT("Greet.Stranger")));
+		TestEqual(TEXT("its condition passes"), Candidates[0].PassingConditionCount, 1);
+		TestEqual(TEXT("and none fail"), Candidates[0].FailingConditionCount, 0);
+	}
+
+	IYarnVariableStorage::Execute_SetValue(Storage, TEXT("$met"), FYarnValue(true));
+	TestFalse(TEXT("the group has nothing to run once its only condition fails"), Runner->HasSalientContent(TEXT("Greet")));
+	Candidates = Runner->GetSaliencyOptionsForNodeGroup(TEXT("Greet"));
+	TestTrue(TEXT("the failing member is still listed"), Candidates.Num() == 1 && Candidates[0].FailingConditionCount == 1);
+
+	TestTrue(TEXT("a plain node always has content"), Runner->HasSalientContent(TEXT("Shop")));
+	TestEqual(TEXT("a plain node is its own single option"), Runner->GetSaliencyOptionsForNodeGroup(TEXT("Shop")).Num(), 1);
+
+	AddExpectedMessagePlain(TEXT("is not a valid node name"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 2);
+	TestFalse(TEXT("an unknown group has no content"), Runner->HasSalientContent(TEXT("Nope")));
+	TestEqual(TEXT("an unknown group has no options"), Runner->GetSaliencyOptionsForNodeGroup(TEXT("Nope")).Num(), 0);
+
+	WorldWrapper.DestroyTestWorld(true);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FYarnCommandTokenisationTest, "YarnSpinner.Commands.TokenisationEdges",
 	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FYarnCommandTokenisationTest::RunTest(const FString& Parameters)

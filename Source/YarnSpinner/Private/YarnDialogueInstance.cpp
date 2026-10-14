@@ -652,10 +652,17 @@ void UYarnDialogueInstance::HandleCommand(const FYarnCommand& Command)
 	}
 
 	bool bRequestedBlocking = false;
-	if (TryDispatchToBlueprintHandler(Command, bRequestedBlocking)
-		|| TryDispatchToWorldActor(Command, bRequestedBlocking))
+	bDispatchingReflectedCommand = true;
+	bReflectedCommandCompletedEarly = false;
+	const bool bDispatched = TryDispatchToBlueprintHandler(Command, bRequestedBlocking)
+		|| TryDispatchToWorldActor(Command, bRequestedBlocking);
+	bDispatchingReflectedCommand = false;
+	const bool bCompletedEarly = bReflectedCommandCompletedEarly;
+	bReflectedCommandCompletedEarly = false;
+
+	if (bDispatched)
 	{
-		if (bRequestedBlocking)
+		if (bRequestedBlocking && !bCompletedEarly)
 		{
 			bBlockingCommandPending = true;
 			return;
@@ -989,6 +996,12 @@ void UYarnDialogueInstance::AddBlockingCommandHandler(const FString& CommandName
 
 void UYarnDialogueInstance::CompleteBlockingCommand()
 {
+	if (bDispatchingReflectedCommand)
+	{
+		bReflectedCommandCompletedEarly = true;
+		return;
+	}
+
 	if (!bBlockingCommandPending)
 	{
 		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: CompleteBlockingCommand called but no blocking command is pending"));
@@ -1722,56 +1735,68 @@ void UYarnDialogueInstance::RegisterBuiltInFunctions()
 		if (Params.Num() < 1) return FYarnValue(false);
 		if (!Owner.IsValid()) return FYarnValue(false);
 
-		FString NodeGroupName = Params[0].ConvertToString();
-
-		if (!Owner->YarnProject)
-		{
-			return FYarnValue(false);
-		}
-
-		const FYarnNode* Node = Owner->YarnProject->Program.Nodes.Find(NodeGroupName);
-		if (!Node)
-		{
-			return FYarnValue(false);
-		}
-
-		// Check if this node is a node group hub
-		if (!Node->HasHeader(TEXT("$Yarn.Internal.NodeGroupHub")))
-		{
-			return FYarnValue(true);
-		}
-
-		// Use GetSaliencyOptionsForNodeGroup to properly evaluate smart variable conditions
-		FOnSmartVariableCallFunction CallFunctionHandler;
-		CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
-			return CallFunctionForSmartVariable(FunctionName, Parameters);
-		});
-
-		TArray<FYarnSaliencyCandidate> Candidates;
-		FYarnSmartVariableEvaluationVM::GetSaliencyOptionsForNodeGroup(
-			NodeGroupName,
-			Owner->YarnProject->Program,
-			Owner->VariableStorage,
-			CallFunctionHandler,
-			Candidates);
-
-		if (Candidates.Num() == 0)
-		{
-			return FYarnValue(false);
-		}
-
-		// Check if any candidate can be selected by the saliency strategy
-		if (!ActiveSaliencyStrategy.GetObject())
-		{
-			// No strategy means we can't determine - assume content exists
-			return FYarnValue(true);
-		}
-
-		// Check if any candidate can be selected
-		FYarnSaliencyCandidate SelectedCandidate;
-		bool bHasContent = IYarnSaliencyStrategy::Execute_QueryBestContent(ActiveSaliencyStrategy.GetObject(), Candidates, SelectedCandidate);
-		return FYarnValue(bHasContent);
+		return FYarnValue(HasSalientContent(Params[0].ConvertToString()));
 	}, 1);
+}
+
+bool UYarnDialogueInstance::GetSaliencyOptionsForNodeGroup(const FString& NodeGroup, TArray<FYarnSaliencyCandidate>& OutCandidates)
+{
+	OutCandidates.Empty();
+
+	if (!Owner.IsValid() || !Owner->YarnProject)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: Can't get saliency options for '%s' - no Yarn project is set"), *NodeGroup);
+		return false;
+	}
+
+	const FYarnNode* Node = Owner->YarnProject->Program.GetNode(NodeGroup);
+	if (!Node)
+	{
+		UE_LOG(LogYarnSpinner, Warning, TEXT("YarnDialogueRunner: Can't get saliency options for '%s' - it is not a valid node name"), *NodeGroup);
+		return false;
+	}
+
+	if (!Node->HasHeader(TEXT("$Yarn.Internal.NodeGroupHub")))
+	{
+		FYarnSaliencyCandidate Candidate;
+		Candidate.ContentID = NodeGroup;
+		Candidate.ContentType = EYarnSaliencyContentType::Node;
+		Candidate.ComplexityScore = 0;
+		Candidate.PassingConditionCount = 1;
+		Candidate.FailingConditionCount = 0;
+		Candidate.bConditionPassed = true;
+		OutCandidates.Add(Candidate);
+		return true;
+	}
+
+	FOnSmartVariableCallFunction CallFunctionHandler;
+	CallFunctionHandler.BindLambda([this](const FString& FunctionName, const TArray<FYarnValue>& Parameters) -> FYarnValue {
+		return CallFunctionForSmartVariable(FunctionName, Parameters);
+	});
+
+	return FYarnSmartVariableEvaluationVM::GetSaliencyOptionsForNodeGroup(
+		NodeGroup,
+		Owner->YarnProject->Program,
+		Owner->VariableStorage,
+		CallFunctionHandler,
+		OutCandidates);
+}
+
+bool UYarnDialogueInstance::HasSalientContent(const FString& NodeGroup)
+{
+	TArray<FYarnSaliencyCandidate> Candidates;
+	if (!GetSaliencyOptionsForNodeGroup(NodeGroup, Candidates) || Candidates.Num() == 0)
+	{
+		return false;
+	}
+
+	if (!ActiveSaliencyStrategy.GetObject())
+	{
+		return true;
+	}
+
+	FYarnSaliencyCandidate SelectedCandidate;
+	return IYarnSaliencyStrategy::Execute_QueryBestContent(ActiveSaliencyStrategy.GetObject(), Candidates, SelectedCandidate);
 }
 
 FYarnLocalizedLine UYarnDialogueInstance::GetLocalizedLine(const FYarnLine& Line)

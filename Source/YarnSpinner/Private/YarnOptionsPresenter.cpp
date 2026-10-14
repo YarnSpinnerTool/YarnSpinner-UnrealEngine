@@ -394,6 +394,11 @@ void UYarnOptionsPresenter::OnHurryUpRequested_Implementation()
 	}
 }
 
+void UYarnOptionsPresenter::OnOptionsHurryUpRequested_Implementation()
+{
+	OnHurryUpRequested_Implementation();
+}
+
 void UYarnOptionsPresenter::HandleOptionSelected(int32 OptionIndex)
 {
 	if (!bIsPresentingOptions || bHasSubmittedSelection)
@@ -592,7 +597,7 @@ void UYarnOptionsPresenter::UpdateFade(float DeltaTime)
 {
 	float Duration = bFadingIn ? FadeInDuration : FadeOutDuration;
 
-	if (Duration <= 0.0f)
+	if (Duration <= 0.0f || (bFadingIn && IsOptionHurryUpRequested()))
 	{
 		FadeProgress = 1.0f;
 	}
