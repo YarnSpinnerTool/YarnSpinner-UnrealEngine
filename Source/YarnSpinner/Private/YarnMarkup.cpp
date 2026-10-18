@@ -181,10 +181,9 @@ FYarnMarkupReplacementResult UYarnStyleMarkupProcessor::ProcessMarkup_Implementa
 	if (StyleName.IsEmpty())
 	{
 		// Try using the first property value as the style name
-		for (const auto& Pair : Attribute.Properties)
+		if (auto It = Attribute.Properties.CreateConstIterator())
 		{
-			StyleName = Pair.Value.ToString();
-			break;
+			StyleName = It.Value().ToString();
 		}
 	}
 
