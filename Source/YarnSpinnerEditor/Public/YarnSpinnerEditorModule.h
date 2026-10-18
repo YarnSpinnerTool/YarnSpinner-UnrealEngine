@@ -87,6 +87,7 @@ private:
 
 	TArray<FName> CustomizedClassNames;
 	TArray<FName> CustomizedPropertyTypeNames;
+	TSharedPtr<class IPropertyTypeIdentifier> PresenterPickerIdentifier;
 
 	/** Map of watched directory path -> watcher delegate handle */
 	TMap<FString, FDelegateHandle> WatchedDirectories;

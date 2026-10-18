@@ -163,7 +163,7 @@ public:
 	 * at BeginPlay. Supports presenters on this actor or (via the picker)
 	 * any other actor in the level.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Yarn Spinner", meta = (UseComponentPicker, AllowAnyActor, AllowedClasses = "/Script/YarnSpinner.YarnDialoguePresenter", DisplayName = "Dialogue Presenters"))
+	UPROPERTY(EditAnywhere, Category = "Yarn Spinner", meta = (YarnPresenterPicker, AllowedClasses = "/Script/YarnSpinner.YarnDialoguePresenter", DisplayName = "Dialogue Presenters"))
 	TArray<FComponentReference> DialoguePresenterReferences;
 
 	 /**
@@ -195,6 +195,9 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
 	void StartDialogueFromReference(const FYarnNodeReference& NodeReference);
+
+	UFUNCTION(BlueprintCallable, Category = "Yarn Spinner")
+	void AddDialoguePresenter(UYarnDialoguePresenter* Presenter);
 
 	 /**
 	 * Objects containing command handler functions for Blueprint-based commands.
@@ -508,6 +511,8 @@ public:
 	void HandlePresenterOptionSelected(int32 OptionIndex);
 
 protected:
+	void PrepareDialoguePresenters();
+
 	// ========================================================================
 	// Internal state
 	// ========================================================================

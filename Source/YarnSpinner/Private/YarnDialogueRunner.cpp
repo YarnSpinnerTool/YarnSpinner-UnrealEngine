@@ -82,14 +82,7 @@ void UYarnDialogueRunner::BeginPlay()
 		}
 	}
 
-	// Set up presenters
-	for (UYarnDialoguePresenter* Presenter : DialoguePresenters)
-	{
-		if (Presenter)
-		{
-			Presenter->SetDialogueRunner(this);
-		}
-	}
+	PrepareDialoguePresenters();
 
 	// Set up line provider - use built-in provider by default
 	if (!LineProvider)
@@ -166,10 +159,35 @@ void UYarnDialogueRunner::SetYarnProject(UYarnProject* NewYarnProject)
 
 void UYarnDialogueRunner::StartDialogue(const FString& NodeName)
 {
+	PrepareDialoguePresenters();
 	if (Instance)
 	{
 		Instance->StartDialogue(NodeName);
 	}
+}
+
+void UYarnDialogueRunner::AddDialoguePresenter(UYarnDialoguePresenter* Presenter)
+{
+	if (!Presenter)
+	{
+		return;
+	}
+	DialoguePresenters.AddUnique(Presenter);
+	Presenter->SetDialogueRunner(this);
+}
+
+void UYarnDialogueRunner::PrepareDialoguePresenters()
+{
+	TArray<TObjectPtr<UYarnDialoguePresenter>> Unique;
+	for (UYarnDialoguePresenter* Presenter : DialoguePresenters)
+	{
+		if (Presenter && !Unique.Contains(Presenter))
+		{
+			Unique.Add(Presenter);
+			Presenter->SetDialogueRunner(this);
+		}
+	}
+	DialoguePresenters = MoveTemp(Unique);
 }
 
 void UYarnDialogueRunner::StartDialogueFromStart()

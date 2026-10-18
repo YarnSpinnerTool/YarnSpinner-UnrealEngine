@@ -450,7 +450,8 @@ bool UYarnProjectFactory::CompileYarnProject(const FString& ProjectPath, FString
 
 	if (ReturnCode != 0)
 	{
-		OutError = FString::Printf(TEXT("ysc returned error code %d: %s"), ReturnCode, *StdErr);
+		const FString Output = !StdErr.IsEmpty() ? StdErr : (OutDiagnostics.Num() == 0 ? StdOut.TrimStartAndEnd() : FString());
+		OutError = FString::Printf(TEXT("ysc returned error code %d: %s"), ReturnCode, *Output);
 		return false;
 	}
 
@@ -679,7 +680,7 @@ bool UYarnProjectFactory::ParseYarnProjectLocalization(const FString& ProjectPat
 		// Iterate over each culture in the localisation object
 		for (const auto& CulturePair : (*LocalisationObject)->Values)
 		{
-			FString CultureCode = CulturePair.Key;
+			FString CultureCode(*CulturePair.Key);
 			const TSharedPtr<FJsonObject>* CultureObject;
 
 			if (CulturePair.Value->TryGetObject(CultureObject))

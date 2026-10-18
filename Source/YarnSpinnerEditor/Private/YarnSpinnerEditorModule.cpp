@@ -29,10 +29,12 @@
 #include "YarnEditorPaths.h"
 #include "YarnBrandedDetails.h"
 #include "YarnNodeReferenceCustomization.h"
+#include "YarnPresenterReferenceCustomization.h"
 #include "PropertyEditorModule.h"
 #include "EditorReimportHandler.h"
 #include "Editor.h"
 #include "Misc/CoreDelegates.h"
+#include "Misc/EngineVersionComparison.h"
 #include "UObject/Reload.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -125,6 +127,12 @@ void FYarnSpinnerEditorModule::RegisterDetailsCustomizations()
 		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FYarnNodeReferenceCustomization::MakeInstance));
 	CustomizedPropertyTypeNames.Add(FName("YarnNodeReference"));
 
+	PresenterPickerIdentifier = MakeShared<FYarnPresenterPickerIdentifier>();
+	PropertyModule.RegisterCustomPropertyTypeLayout(
+		FName("ComponentReference"),
+		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FYarnPresenterReferenceCustomization::MakeInstance),
+		PresenterPickerIdentifier);
+
 	PropertyModule.NotifyCustomizationModuleChanged();
 }
 
@@ -141,9 +149,14 @@ void FYarnSpinnerEditorModule::UnregisterDetailsCustomizations()
 		{
 			PropertyModule.UnregisterCustomPropertyTypeLayout(PropertyTypeName);
 		}
+		if (PresenterPickerIdentifier.IsValid())
+		{
+			PropertyModule.UnregisterCustomPropertyTypeLayout(FName("ComponentReference"), PresenterPickerIdentifier);
+		}
 	}
 	CustomizedClassNames.Empty();
 	CustomizedPropertyTypeNames.Empty();
+	PresenterPickerIdentifier.Reset();
 }
 
 void FYarnSpinnerEditorModule::UnregisterStyleSet()
@@ -431,11 +444,20 @@ void FYarnSpinnerEditorModule::ExecutePendingReimports()
 	RebuildWatcherState();
 }
 
+static auto& PostEngineInitDelegate()
+{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	return FCoreDelegates::OnPostEngineInit;
+#else
+	return FCoreDelegates::GetOnPostEngineInit();
+#endif
+}
+
 // ============================================================================
 
 void FYarnSpinnerEditorModule::SetupYSLSRegenerationHooks()
 {
-	PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([this]()
+	PostEngineInitHandle = PostEngineInitDelegate().AddLambda([this]()
 	{
 		if (GEditor)
 		{
@@ -453,7 +475,7 @@ void FYarnSpinnerEditorModule::TeardownYSLSRegenerationHooks()
 {
 	if (PostEngineInitHandle.IsValid())
 	{
-		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
+		PostEngineInitDelegate().Remove(PostEngineInitHandle);
 		PostEngineInitHandle.Reset();
 	}
 

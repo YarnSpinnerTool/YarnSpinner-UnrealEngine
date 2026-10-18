@@ -36,6 +36,7 @@
 // FInternationalization - the main entry point for unreal's i18n system.
 // we use Get().GetCurrentCulture() to detect the system language.
 #include "Internationalization/Internationalization.h"
+#include "Misc/EngineVersionComparison.h"
 
 // ============================================================================
 // UYarnBuiltinLineProvider
@@ -298,7 +299,11 @@ void UYarnStringTableLineProvider::ImportYarnProjectToStringTable(UYarnProject* 
 	{
 		// convert yarn line id to string table key format
 		FString Key = UYarnLocalizationLibrary::LineIDToStringTableKey(Pair.Key);
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
 		TableRef->SetSourceString(Key, Pair.Value);
+#else
+		TableRef->SetSourceString(Key, Pair.Value, FString());
+#endif
 	}
 #else
 	UE_LOG(LogYarnSpinner, Error, TEXT("ImportYarnProjectToStringTable is editor-only; it does nothing in packaged builds. Import the string table in the editor and ship the asset instead."));
